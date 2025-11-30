@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tvas"
+version = "0.1.0"
+description = "Travel Vlog Automation System - Automate vlog ingestion, junk detection, and DaVinci Resolve import"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = [
+    "watchdog>=3.0.0",
+    "opentimelineio>=0.17.0",
+]
+
+[project.optional-dependencies]
+cv = [
+    "opencv-python>=4.8.0",
+]
+ui = [
+    "toga>=0.4.0",
+]
+full = [
+    "opencv-python>=4.8.0",
+    "toga>=0.4.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+tvas = "tvas.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

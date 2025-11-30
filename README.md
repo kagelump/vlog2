@@ -1,2 +1,113 @@
-# vlog2
-v2 of the vlog framework
+# TVAS - Travel Vlog Automation System
+
+Automate vlog ingestion, junk detection, and DaVinci Resolve import.
+
+## Features
+
+- **SD Card Detection**: Automatically detects camera SD cards (Sony A7C, DJI Pocket 3, iPhone, Insta360)
+- **Smart Ingestion**: Copies files with SHA256 verification and organized folder structure
+- **AI Analysis**: Uses Qwen 2.5 VL via Ollama for intelligent junk detection
+- **OpenCV Heuristics**: Fast blur and darkness detection for pre-screening
+- **Review UI**: Native macOS UI (Toga) for reviewing AI decisions
+- **Timeline Generation**: Creates OpenTimelineIO files for DaVinci Resolve import
+
+## Installation
+
+### Prerequisites
+
+- Python 3.11+
+- FFmpeg (for proxy generation and video analysis)
+- Ollama (optional, for VLM-based analysis)
+
+### macOS (Homebrew)
+
+```bash
+# Install system dependencies
+brew install python@3.11 ffmpeg ollama
+
+# Download the VLM model (optional)
+ollama pull qwen2.5-vl:7b
+
+# Install TVAS
+pip install -e .
+```
+
+### Install from Source
+
+```bash
+git clone https://github.com/kagelump/vlog2.git
+cd vlog2
+pip install -e ".[dev]"
+```
+
+## Usage
+
+### Watch for SD Cards
+
+```bash
+tvas --watch
+```
+
+### Process a Specific Volume
+
+```bash
+tvas --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
+```
+
+### Skip UI (Auto-approve AI Decisions)
+
+```bash
+tvas --volume /Volumes/SONY_A7C --auto-approve
+```
+
+### Disable VLM (Use OpenCV Only)
+
+```bash
+tvas --volume /Volumes/DJI_POCKET3 --no-vlm
+```
+
+## Project Structure
+
+```
+~/Movies/Vlog/
+  └── 2025-11-30_Tokyo/
+      ├── SonyA7C/
+      ├── DJIPocket3/
+      ├── iPhone11Pro/
+      └── .cache/  (AI proxies, analysis JSON)
+```
+
+## Pipeline Stages
+
+1. **Ingestion**: Copy files from SD card with verification
+2. **Proxy Generation**: Create low-res AI proxies using FFmpeg
+3. **AI Analysis**: Detect junk clips using Qwen 2.5 VL + OpenCV
+4. **User Review**: Review and override AI decisions in Toga UI
+5. **Timeline Generation**: Export OpenTimelineIO for DaVinci Resolve
+
+## Configuration
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--base-path` | Base path for vlog storage | `~/Movies/Vlog` |
+| `--model` | Ollama model for VLM | `qwen2.5-vl:7b` |
+| `--auto-approve` | Skip UI, approve all AI decisions | `False` |
+| `--no-vlm` | Disable VLM, use OpenCV only | `False` |
+
+## Development
+
+### Run Tests
+
+```bash
+pytest
+```
+
+### Run with Verbose Logging
+
+```bash
+tvas --volume /path/to/volume --verbose
+```
+
+## License
+
+MIT
