@@ -8,6 +8,7 @@ import argparse
 import logging
 import signal
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -279,8 +280,6 @@ class TVASApp:
         # Keep running
         try:
             while self._running:
-                import time
-
                 time.sleep(1)
         except KeyboardInterrupt:
             self.stop_watching()

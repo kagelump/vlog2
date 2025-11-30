@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from tvas.proxy import get_video_duration
+
 logger = logging.getLogger(__name__)
 
 # OpenCV is optional - will gracefully degrade if not available
@@ -448,8 +450,6 @@ def analyze_clip(
     video_to_analyze = proxy_path if proxy_path and proxy_path.exists() else source_path
 
     # Get video duration
-    from tvas.proxy import get_video_duration
-
     duration = get_video_duration(video_to_analyze) or 0
 
     # Extract frames for analysis

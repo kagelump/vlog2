@@ -4,6 +4,7 @@ This module handles proxy video generation using FFmpeg with hardware accelerati
 Generates AI proxies (low-res for VLM inference) and optional edit proxies (ProRes).
 """
 
+import json
 import logging
 import os
 import shutil
@@ -361,8 +362,6 @@ def get_video_info(video_path: Path) -> dict[str, Any] | None:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
         if result.returncode == 0:
-            import json
-
             return json.loads(result.stdout)
     except (subprocess.SubprocessError, ValueError, FileNotFoundError):
         pass
