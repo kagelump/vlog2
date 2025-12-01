@@ -6,7 +6,7 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 
 - **SD Card Detection**: Automatically detects camera SD cards (Sony A7C, DJI Pocket 3, iPhone, Insta360)
 - **Smart Ingestion**: Copies files with SHA256 verification and organized folder structure
-- **AI Analysis**: Uses Qwen3 VL (8B) via Ollama for intelligent junk detection
+- **AI Analysis**: Uses Qwen3-VL (8B) via mlx-vlm for intelligent junk detection on Apple Silicon
 - **OpenCV Heuristics**: Fast blur and darkness detection for pre-screening
 - **Review UI**: Native macOS UI (Toga) for reviewing AI decisions
 - **Timeline Generation**: Creates OpenTimelineIO files for DaVinci Resolve import
@@ -17,20 +17,19 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 
 - Python 3.11+
 - FFmpeg (for proxy generation and video analysis)
-- Ollama (optional, for VLM-based analysis)
+- Apple Silicon Mac (M1/M2/M3/M4) for VLM-based analysis with mlx-vlm
 
 ### macOS (Homebrew)
 
 ```bash
 # Install system dependencies
-brew install python@3.11 ffmpeg ollama
+brew install python@3.11 ffmpeg
 
-# Download the VLM model (optional)
-ollama pull qwen3-vl:8b
-
-# Install TVAS (with all features)
+# Install TVAS (with all features including VLM)
 pip install -e ".[full]"
 ```
+
+The VLM model (`mlx-community/Qwen3-VL-8B-Instruct-8bit`) will be automatically downloaded from HuggingFace on first use.
 
 ### Install from Source
 
@@ -39,6 +38,12 @@ git clone https://github.com/kagelump/vlog2.git
 cd vlog2
 pip install -e ".[full]"
 ```
+
+### Optional Dependencies
+
+- **VLM only**: `pip install -e ".[vlm]"` - For AI-powered junk detection
+- **CV only**: `pip install -e ".[cv]"` - For OpenCV-based analysis
+- **UI only**: `pip install -e ".[ui]"` - For the native macOS review UI
 
 ## Usage
 
@@ -90,7 +95,7 @@ tvas --volume /Volumes/DJI_POCKET3 --no-vlm
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--base-path` | Base path for vlog storage | `~/Movies/Vlog` |
-| `--model` | Ollama model for VLM | `qwen3-vl:8b` |
+| `--model` | mlx-vlm model for VLM | `mlx-community/Qwen3-VL-8B-Instruct-8bit` |
 | `--auto-approve` | Skip UI, approve all AI decisions | `False` |
 | `--no-vlm` | Disable VLM, use OpenCV only | `False` |
 

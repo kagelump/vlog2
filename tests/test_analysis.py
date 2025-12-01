@@ -1,34 +1,51 @@
 """Tests for the analysis module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from tvas.analysis import (
     ClipDecision,
     ConfidenceLevel,
+    DEFAULT_VLM_MODEL,
     FrameAnalysis,
     JunkReason,
     _make_decision,
-    check_ollama_available,
+    check_mlx_vlm_available,
 )
 
 
-class TestOllamaAvailability:
-    """Tests for Ollama availability check."""
+class TestMlxVlmAvailability:
+    """Tests for mlx-vlm availability check."""
 
-    def test_check_ollama_available_present(self):
-        """Test when Ollama is available."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            assert check_ollama_available() is True
+    def test_check_mlx_vlm_available_present(self):
+        """Test when mlx-vlm is available."""
+        import tvas.analysis
+        original = tvas.analysis.MLX_VLM_AVAILABLE
+        tvas.analysis.MLX_VLM_AVAILABLE = True
+        try:
+            assert tvas.analysis.check_mlx_vlm_available() is True
+        finally:
+            tvas.analysis.MLX_VLM_AVAILABLE = original
 
-    def test_check_ollama_available_missing(self):
-        """Test when Ollama is not available."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError()
-            assert check_ollama_available() is False
+    def test_check_mlx_vlm_available_missing(self):
+        """Test when mlx-vlm is not available."""
+        import tvas.analysis
+        original = tvas.analysis.MLX_VLM_AVAILABLE
+        tvas.analysis.MLX_VLM_AVAILABLE = False
+        try:
+            assert tvas.analysis.check_mlx_vlm_available() is False
+        finally:
+            tvas.analysis.MLX_VLM_AVAILABLE = original
+
+
+class TestDefaultModel:
+    """Tests for the default model constant."""
+
+    def test_default_model_is_correct(self):
+        """Test that the default model is the expected one."""
+        assert DEFAULT_VLM_MODEL == "mlx-community/Qwen3-VL-8B-Instruct-8bit"
 
 
 class TestMakeDecision:

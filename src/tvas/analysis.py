@@ -1,6 +1,6 @@
 """Stage 3: AI Analysis (Junk Detection)
 
-This module handles AI-powered junk detection using Qwen3 VL (8B) via Ollama,
+This module handles AI-powered junk detection using Qwen3 VL (8B) via mlx-vlm,
 combined with OpenCV heuristics for blur and darkness detection.
 """
 
@@ -8,9 +8,7 @@ import json
 import logging
 import subprocess
 import tempfile
-import base64
-import urllib.request
-import urllib.error
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -29,6 +27,28 @@ except ImportError:
     OPENCV_AVAILABLE = False
     cv2 = None
     np = None
+
+# mlx-vlm is optional - will gracefully degrade if not available
+try:
+    from mlx_vlm import load, generate
+    from mlx_vlm.prompt_utils import apply_chat_template
+    from mlx_vlm.utils import load_config
+
+    MLX_VLM_AVAILABLE = True
+except ImportError:
+    MLX_VLM_AVAILABLE = False
+    load = None
+    generate = None
+    apply_chat_template = None
+    load_config = None
+
+# Default model for mlx-vlm
+DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
+
+# Cache for loaded models to avoid reloading on each frame
+# Structure: {model_name: (model, processor, config)}
+_model_cache: dict[str, tuple] = {}
+_model_cache_lock = threading.Lock()
 
 
 class JunkReason(Enum):
@@ -89,43 +109,55 @@ class ClipAnalysis:
     vlm_summary: str | None = None
 
 
-def check_ollama_available() -> bool:
-    """Check if Ollama is available on the system.
+def check_mlx_vlm_available() -> bool:
+    """Check if mlx-vlm is available on the system.
 
     Returns:
-        True if Ollama is available and running.
+        True if mlx-vlm is available and can be used.
     """
-    try:
-        result = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.returncode == 0
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
+    return MLX_VLM_AVAILABLE
 
 
-def check_model_available(model_name: str = "qwen3-vl:8b") -> bool:
-    """Check if the specified model is available in Ollama.
+def check_model_available(model_name: str = DEFAULT_VLM_MODEL) -> bool:
+    """Check if the specified model can be loaded.
+
+    Note: mlx-vlm models are downloaded automatically on first use
+    from HuggingFace. This function checks if mlx-vlm is available.
 
     Args:
-        model_name: Name of the Ollama model.
+        model_name: Name of the mlx-vlm model.
 
     Returns:
-        True if the model is available.
+        True if mlx-vlm is available (model will be downloaded if needed).
     """
-    try:
-        result = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return model_name in result.stdout
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
+    return MLX_VLM_AVAILABLE
+
+
+def _get_or_load_model(model_name: str = DEFAULT_VLM_MODEL):
+    """Get a cached model or load it.
+
+    Args:
+        model_name: Name of the mlx-vlm model.
+
+    Returns:
+        Tuple of (model, processor, config) or (None, None, None) if unavailable.
+    """
+    if not MLX_VLM_AVAILABLE:
+        return None, None, None
+
+    with _model_cache_lock:
+        if model_name not in _model_cache:
+            try:
+                logger.info(f"Loading mlx-vlm model: {model_name}")
+                model, processor = load(model_name)
+                config = load_config(model_name)
+                _model_cache[model_name] = (model, processor, config)
+                logger.info(f"Model {model_name} loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load model {model_name}: {e}")
+                return None, None, None
+
+        return _model_cache[model_name]
 
 
 def extract_frames(
@@ -307,17 +339,35 @@ def analyze_frame_opencv(frame_path: Path) -> dict:
 
 def analyze_frame_vlm(
     frame_path: Path,
-    model_name: str = "qwen3-vl:8b",
+    model_name: str = DEFAULT_VLM_MODEL,
 ) -> dict:
-    """Analyze a frame using Vision Language Model via Ollama.
+    """Analyze a frame using Vision Language Model via mlx-vlm.
 
     Args:
         frame_path: Path to the frame image.
-        model_name: Name of the Ollama model to use.
+        model_name: Name of the mlx-vlm model to use.
 
     Returns:
         Dictionary with VLM analysis results.
     """
+    if not MLX_VLM_AVAILABLE:
+        logger.warning("mlx-vlm not available - skipping VLM analysis")
+        return {
+            "is_junk": False,
+            "reason": "mlx-vlm not available",
+            "issues": [],
+            "raw_response": None,
+        }
+
+    model, processor, config = _get_or_load_model(model_name)
+    if model is None:
+        return {
+            "is_junk": False,
+            "reason": "Failed to load model",
+            "issues": [],
+            "raw_response": None,
+        }
+
     prompt = """Analyze this video frame for quality issues. 
 Look for: blur/motion blur, camera pointing at ground, lens cap covering lens, 
 extremely dark/black frames, accidental recording triggers.
@@ -328,60 +378,52 @@ Respond with ONLY valid JSON in this exact format:
 Be conservative - only mark as junk if there are clear quality issues."""
 
     try:
-        # Read and encode image
-        with open(frame_path, "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-
-        # Prepare JSON payload
-        payload = {
-            "model": model_name,
-            "prompt": prompt,
-            "images": [encoded_string],
-            "stream": False,
-            "format": "json"
-        }
-        
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
-            data=data,
-            headers={'Content-Type': 'application/json'}
+        # Format the prompt using mlx-vlm's chat template
+        formatted_prompt = apply_chat_template(
+            processor, config, prompt, num_images=1
         )
 
-        with urllib.request.urlopen(req, timeout=60) as response:
-            result_json = json.loads(response.read().decode('utf-8'))
-            response_text = result_json.get("response", "")
+        # Generate response
+        response_text = generate(
+            model,
+            processor,
+            formatted_prompt,
+            [str(frame_path)],
+            verbose=False,
+            max_tokens=256,
+        )
 
-            # Try to parse JSON from response
-            try:
-                # Find JSON in response (model might add extra text)
-                start = response_text.find("{")
-                end = response_text.rfind("}") + 1
-                if start >= 0 and end > start:
-                    json_str = response_text[start:end]
-                    data = json.loads(json_str)
-                    return {
-                        "is_junk": data.get("is_junk", False),
-                        "reason": data.get("reason", ""),
-                        "issues": data.get("issues", []),
-                        "raw_response": response_text,
-                    }
-            except json.JSONDecodeError:
-                pass
+        # Try to parse JSON from response
+        try:
+            # Find JSON in response (model might add extra text)
+            start = response_text.find("{")
+            end = response_text.rfind("}") + 1
+            if start >= 0 and end > start:
+                json_str = response_text[start:end]
+                data = json.loads(json_str)
+                return {
+                    "is_junk": data.get("is_junk", False),
+                    "reason": data.get("reason", ""),
+                    "issues": data.get("issues", []),
+                    "raw_response": response_text,
+                }
+        except json.JSONDecodeError:
+            pass
 
-            # Fallback: simple keyword detection
-            is_junk = any(word in response_text.lower() for word in ["junk", "blur", "dark", "ground", "accidental"])
-            return {
-                "is_junk": is_junk,
-                "reason": response_text[:200],
-                "issues": [],
-                "raw_response": response_text,
-            }
+        # Fallback: simple keyword detection
+        is_junk = any(
+            word in response_text.lower()
+            for word in ["junk", "blur", "dark", "ground", "accidental"]
+        )
+        return {
+            "is_junk": is_junk,
+            "reason": response_text[:200],
+            "issues": [],
+            "raw_response": response_text,
+        }
 
-    except (urllib.error.URLError, OSError) as e:
-        logger.warning(f"VLM analysis failed for {frame_path}: {e}")
     except Exception as e:
-        logger.error(f"Unexpected error during VLM analysis for {frame_path}: {e}")
+        logger.error(f"VLM analysis failed for {frame_path}: {e}")
 
     return {
         "is_junk": False,
@@ -438,7 +480,7 @@ def analyze_clip(
     source_path: Path,
     proxy_path: Path | None = None,
     use_vlm: bool = True,
-    model_name: str = "qwen3-vl:8b",
+    model_name: str = DEFAULT_VLM_MODEL,
 ) -> ClipAnalysis:
     """Perform complete analysis of a video clip.
 
@@ -448,7 +490,7 @@ def analyze_clip(
         source_path: Path to the original video file.
         proxy_path: Path to the AI proxy (preferred for analysis).
         use_vlm: Whether to use VLM for analysis.
-        model_name: Ollama model name for VLM analysis.
+        model_name: mlx-vlm model name for VLM analysis.
 
     Returns:
         ClipAnalysis with complete analysis results.
@@ -472,7 +514,7 @@ def analyze_clip(
 
             # VLM analysis (if enabled and available)
             vlm_result = None
-            if use_vlm and check_ollama_available():
+            if use_vlm and check_mlx_vlm_available():
                 vlm_result = analyze_frame_vlm(frame_path, model_name)
 
             # Combine results
@@ -628,14 +670,14 @@ def _make_decision(
 def analyze_clips_batch(
     clips: list[tuple[Path, Path | None]],
     use_vlm: bool = True,
-    model_name: str = "qwen3-vl:8b",
+    model_name: str = DEFAULT_VLM_MODEL,
 ) -> list[ClipAnalysis]:
     """Analyze a batch of video clips.
 
     Args:
         clips: List of (source_path, proxy_path) tuples.
         use_vlm: Whether to use VLM for analysis.
-        model_name: Ollama model name.
+        model_name: mlx-vlm model name.
 
     Returns:
         List of ClipAnalysis results.

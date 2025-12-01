@@ -18,11 +18,15 @@ dependencies = [
 cv = [
     "opencv-python>=4.8.0",
 ]
+vlm = [
+    "mlx-vlm>=0.3.0",
+]
 ui = [
     "toga>=0.4.0",
 ]
 full = [
     "opencv-python>=4.8.0",
+    "mlx-vlm>=0.3.0",
     "toga>=0.4.0",
 ]
 dev = [
