@@ -6,7 +6,7 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 
 - **SD Card Detection**: Automatically detects camera SD cards (Sony A7C, DJI Pocket 3, iPhone, Insta360)
 - **Smart Ingestion**: Copies files with SHA256 verification and organized folder structure
-- **AI Analysis**: Uses Qwen 2.5 VL via Ollama for intelligent junk detection
+- **AI Analysis**: Uses Qwen3 VL (8B) via Ollama for intelligent junk detection
 - **OpenCV Heuristics**: Fast blur and darkness detection for pre-screening
 - **Review UI**: Native macOS UI (Toga) for reviewing AI decisions
 - **Timeline Generation**: Creates OpenTimelineIO files for DaVinci Resolve import
@@ -26,10 +26,10 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 brew install python@3.11 ffmpeg ollama
 
 # Download the VLM model (optional)
-ollama pull qwen2.5-vl:7b
+ollama pull qwen3-vl:8b
 
-# Install TVAS
-pip install -e .
+# Install TVAS (with all features)
+pip install -e ".[full]"
 ```
 
 ### Install from Source
@@ -37,7 +37,7 @@ pip install -e .
 ```bash
 git clone https://github.com/kagelump/vlog2.git
 cd vlog2
-pip install -e ".[dev]"
+pip install -e ".[full]"
 ```
 
 ## Usage
@@ -81,7 +81,7 @@ tvas --volume /Volumes/DJI_POCKET3 --no-vlm
 
 1. **Ingestion**: Copy files from SD card with verification
 2. **Proxy Generation**: Create low-res AI proxies using FFmpeg
-3. **AI Analysis**: Detect junk clips using Qwen 2.5 VL + OpenCV
+3. **AI Analysis**: Detect junk clips using Qwen3 VL (8B) + OpenCV
 4. **User Review**: Review and override AI decisions in Toga UI
 5. **Timeline Generation**: Export OpenTimelineIO for DaVinci Resolve
 
@@ -90,7 +90,7 @@ tvas --volume /Volumes/DJI_POCKET3 --no-vlm
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--base-path` | Base path for vlog storage | `~/Movies/Vlog` |
-| `--model` | Ollama model for VLM | `qwen2.5-vl:7b` |
+| `--model` | Ollama model for VLM | `qwen3-vl:8b` |
 | `--auto-approve` | Skip UI, approve all AI decisions | `False` |
 | `--no-vlm` | Disable VLM, use OpenCV only | `False` |
 

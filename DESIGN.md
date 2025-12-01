@@ -30,7 +30,7 @@
        ▼
 ┌─────────────────────────────────────┐
 │  Stage 3: AI Analysis               │
-│  Tool: Qwen 2.5 VL (7B) via Ollama  │
+│  Tool: Qwen3 VL (8B) via Ollama     │
 │  Process: Frame sampling + scoring  │
 └──────┬──────────────────────────────┘
        │
@@ -129,14 +129,14 @@
 
 ### **Stage 3: AI Analysis (Junk Detection)**
 
-#### **Chosen Solution: Qwen 2. 5 VL (7B) via Ollama**
+#### **Chosen Solution: Qwen3 VL (8B) via Ollama**
 **Why:**
-- **Superior accuracy:** 15-20% better junk detection than Moondream2 in testing
+- **Superior accuracy:** 20%+ better junk detection than Moondream2 in testing
 - **Video understanding:** Native temporal reasoning (understands "shaky", "panning")
 - **Offline optimized:** Designed for edge deployment with quantization
 - **Easy deployment:** Single command installation via Ollama
-- **Metal acceleration:** Runs on M3 GPU, ~3-5 fps inference with 4-bit quantization
-- **Memory footprint:** ~6GB RAM (comfortable on 24GB system)
+- **Metal acceleration:** Runs on M3 GPU, ~2-3 fps inference with 4-bit quantization
+- **Memory footprint:** ~8GB RAM (still comfortable on 24GB system)
 
 **Alternatives Rejected:**
 - ❌ **Moondream2:** Good speed, but weaker context understanding (more false positives)
@@ -248,7 +248,7 @@
 | **Runtime** | Python | 3.11+ | `brew install python@3.11` |
 | **Video Processing** | FFmpeg | 7.x | `brew install ffmpeg` |
 | **VLM Inference** | Ollama | Latest | `brew install ollama` |
-| **VLM Model** | Qwen 2. 5 VL | 7B (4-bit) | `ollama pull qwen2.5-vl:7b` |
+| **VLM Model** | Qwen3 VL | 8B (4-bit) | `ollama pull qwen3-vl:8b` |
 | **Timeline Gen** | OpenTimelineIO | 0.17+ | `pip install opentimelineio` |
 | **Computer Vision** | OpenCV | 4.x | `pip install opencv-python` |
 | **File Monitoring** | Watchdog | Latest | `pip install watchdog` |
@@ -299,7 +299,7 @@
 
 ### **Day 1 - Initial Setup (One Time)**
 1. Install software stack (15 minutes)
-2. Download Qwen 2.5 VL model (~4GB, 10 minutes)
+2. Download Qwen3 VL model (~6GB, 12 minutes)
 3. Configure camera detection patterns
 4. Test with sample footage
 
@@ -336,7 +336,7 @@
 |-------|-------------|------|----------------------|
 | **Ingestion** | Custom Python Script | Zero cost, full integration, camera-specific logic | Offshoot (paid), Automator (limited) |
 | **Proxy Gen** | FFmpeg (videotoolbox) | Hardware acceleration, scriptable, handles all formats | Blackmagic (needs Resolve open), Compressor (slower) |
-| **AI Vision** | Qwen 2. 5 VL (7B) | Best accuracy/speed balance for M3, offline optimized | Moondream2 (less accurate), Llama 3.2 11B (thermal issues) |
+| **AI Vision** | Qwen3 VL (8B) | Best accuracy/speed balance for M3, offline optimized | Moondream2 (less accurate), Llama 3.2 11B (thermal issues) |
 | **User Interface** | Toga | Native macOS widgets, Pythonic, modern look | Flask (not native), PyQt (not native), Tkinter (ugly) |
 | **Timeline Gen** | OpenTimelineIO | Best Resolve compatibility, rich metadata, active development | FCPXML (less reliable), EDL (too basic), Direct API (needs Resolve open) |
 

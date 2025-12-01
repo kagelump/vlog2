@@ -41,7 +41,7 @@ class TVASApp:
         self,
         vlog_base_path: Path | None = None,
         use_vlm: bool = True,
-        vlm_model: str = "qwen2.5-vl:7b",
+        vlm_model: str = "qwen3-vl:8b",
         auto_approve: bool = False,
     ):
         """Initialize the TVAS application.
@@ -332,7 +332,7 @@ Examples:
     parser.add_argument(
         "--model",
         type=str,
-        default="qwen2.5-vl:7b",
+        default="qwen3-vl:8b",
         help="Ollama model for VLM analysis",
     )
 

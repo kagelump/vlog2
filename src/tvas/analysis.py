@@ -1,6 +1,6 @@
 """Stage 3: AI Analysis (Junk Detection)
 
-This module handles AI-powered junk detection using Qwen 2.5 VL via Ollama,
+This module handles AI-powered junk detection using Qwen3 VL (8B) via Ollama,
 combined with OpenCV heuristics for blur and darkness detection.
 """
 
@@ -8,6 +8,9 @@ import json
 import logging
 import subprocess
 import tempfile
+import base64
+import urllib.request
+import urllib.error
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -104,7 +107,7 @@ def check_ollama_available() -> bool:
         return False
 
 
-def check_model_available(model_name: str = "qwen2.5-vl:7b") -> bool:
+def check_model_available(model_name: str = "qwen3-vl:8b") -> bool:
     """Check if the specified model is available in Ollama.
 
     Args:
@@ -304,7 +307,7 @@ def analyze_frame_opencv(frame_path: Path) -> dict:
 
 def analyze_frame_vlm(
     frame_path: Path,
-    model_name: str = "qwen2.5-vl:7b",
+    model_name: str = "qwen3-vl:8b",
 ) -> dict:
     """Analyze a frame using Vision Language Model via Ollama.
 
@@ -325,57 +328,60 @@ Respond with ONLY valid JSON in this exact format:
 Be conservative - only mark as junk if there are clear quality issues."""
 
     try:
-        # Use Ollama CLI with image
-        cmd = [
-            "ollama",
-            "run",
-            model_name,
-            prompt,
-        ]
+        # Read and encode image
+        with open(frame_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
 
-        # For models that support images, we'd pass the image differently
-        # This is a simplified version - in production would use Ollama's API
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            input=str(frame_path),
+        # Prepare JSON payload
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "images": [encoded_string],
+            "stream": False,
+            "format": "json"
+        }
+        
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=data,
+            headers={'Content-Type': 'application/json'}
         )
 
-        if result.returncode == 0:
-            response = result.stdout.strip()
+        with urllib.request.urlopen(req, timeout=60) as response:
+            result_json = json.loads(response.read().decode('utf-8'))
+            response_text = result_json.get("response", "")
 
             # Try to parse JSON from response
             try:
                 # Find JSON in response (model might add extra text)
-                start = response.find("{")
-                end = response.rfind("}") + 1
+                start = response_text.find("{")
+                end = response_text.rfind("}") + 1
                 if start >= 0 and end > start:
-                    json_str = response[start:end]
+                    json_str = response_text[start:end]
                     data = json.loads(json_str)
                     return {
                         "is_junk": data.get("is_junk", False),
                         "reason": data.get("reason", ""),
                         "issues": data.get("issues", []),
-                        "raw_response": response,
+                        "raw_response": response_text,
                     }
             except json.JSONDecodeError:
                 pass
 
             # Fallback: simple keyword detection
-            is_junk = any(word in response.lower() for word in ["junk", "blur", "dark", "ground", "accidental"])
+            is_junk = any(word in response_text.lower() for word in ["junk", "blur", "dark", "ground", "accidental"])
             return {
                 "is_junk": is_junk,
-                "reason": response[:200],
+                "reason": response_text[:200],
                 "issues": [],
-                "raw_response": response,
+                "raw_response": response_text,
             }
 
-    except subprocess.TimeoutExpired:
-        logger.warning(f"VLM analysis timed out for {frame_path}")
-    except subprocess.SubprocessError as e:
+    except (urllib.error.URLError, OSError) as e:
         logger.warning(f"VLM analysis failed for {frame_path}: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error during VLM analysis for {frame_path}: {e}")
 
     return {
         "is_junk": False,
@@ -432,7 +438,7 @@ def analyze_clip(
     source_path: Path,
     proxy_path: Path | None = None,
     use_vlm: bool = True,
-    model_name: str = "qwen2.5-vl:7b",
+    model_name: str = "qwen3-vl:8b",
 ) -> ClipAnalysis:
     """Perform complete analysis of a video clip.
 
@@ -622,7 +628,7 @@ def _make_decision(
 def analyze_clips_batch(
     clips: list[tuple[Path, Path | None]],
     use_vlm: bool = True,
-    model_name: str = "qwen2.5-vl:7b",
+    model_name: str = "qwen3-vl:8b",
 ) -> list[ClipAnalysis]:
     """Analyze a batch of video clips.
 
