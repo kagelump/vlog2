@@ -8,6 +8,7 @@ import json
 import logging
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -45,7 +46,9 @@ except ImportError:
 DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
 
 # Cache for loaded models to avoid reloading on each frame
-_model_cache: dict = {}
+# Structure: {model_name: (model, processor, config)}
+_model_cache: dict[str, tuple] = {}
+_model_cache_lock = threading.Lock()
 
 
 class JunkReason(Enum):
@@ -142,18 +145,19 @@ def _get_or_load_model(model_name: str = DEFAULT_VLM_MODEL):
     if not MLX_VLM_AVAILABLE:
         return None, None, None
 
-    if model_name not in _model_cache:
-        try:
-            logger.info(f"Loading mlx-vlm model: {model_name}")
-            model, processor = load(model_name)
-            config = load_config(model_name)
-            _model_cache[model_name] = (model, processor, config)
-            logger.info(f"Model {model_name} loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load model {model_name}: {e}")
-            return None, None, None
+    with _model_cache_lock:
+        if model_name not in _model_cache:
+            try:
+                logger.info(f"Loading mlx-vlm model: {model_name}")
+                model, processor = load(model_name)
+                config = load_config(model_name)
+                _model_cache[model_name] = (model, processor, config)
+                logger.info(f"Model {model_name} loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load model {model_name}: {e}")
+                return None, None, None
 
-    return _model_cache[model_name]
+        return _model_cache[model_name]
 
 
 def extract_frames(

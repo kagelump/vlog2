@@ -1,7 +1,7 @@
 """Tests for the analysis module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -21,17 +21,13 @@ class TestMlxVlmAvailability:
 
     def test_check_mlx_vlm_available_present(self):
         """Test when mlx-vlm is available."""
-        with patch("tvas.analysis.MLX_VLM_AVAILABLE", True):
-            # Need to reload the function to pick up the patched value
-            from tvas.analysis import check_mlx_vlm_available
-            # Since the function checks a module-level constant, we patch it directly
-            import tvas.analysis
-            original = tvas.analysis.MLX_VLM_AVAILABLE
-            tvas.analysis.MLX_VLM_AVAILABLE = True
-            try:
-                assert tvas.analysis.check_mlx_vlm_available() is True
-            finally:
-                tvas.analysis.MLX_VLM_AVAILABLE = original
+        import tvas.analysis
+        original = tvas.analysis.MLX_VLM_AVAILABLE
+        tvas.analysis.MLX_VLM_AVAILABLE = True
+        try:
+            assert tvas.analysis.check_mlx_vlm_available() is True
+        finally:
+            tvas.analysis.MLX_VLM_AVAILABLE = original
 
     def test_check_mlx_vlm_available_missing(self):
         """Test when mlx-vlm is not available."""
