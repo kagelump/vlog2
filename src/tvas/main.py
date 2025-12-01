@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from tvas.analysis import ClipDecision, analyze_clips_batch
+from tvas.analysis import ClipDecision, analyze_clips_batch, DEFAULT_VLM_MODEL
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
 from tvas.proxy import ProxyConfig, ProxyType, generate_proxies_batch
 from tvas.review_ui import (
@@ -41,7 +41,7 @@ class TVASApp:
         self,
         vlog_base_path: Path | None = None,
         use_vlm: bool = True,
-        vlm_model: str = "qwen3-vl:8b",
+        vlm_model: str = DEFAULT_VLM_MODEL,
         auto_approve: bool = False,
     ):
         """Initialize the TVAS application.
@@ -49,7 +49,7 @@ class TVASApp:
         Args:
             vlog_base_path: Base path for vlog storage (default: ~/Movies/Vlog).
             use_vlm: Whether to use VLM for analysis.
-            vlm_model: Ollama model name for VLM.
+            vlm_model: mlx-vlm model name for VLM.
             auto_approve: Auto-approve all AI decisions without UI.
         """
         self.vlog_base_path = vlog_base_path or Path.home() / "Movies" / "Vlog"
@@ -332,8 +332,8 @@ Examples:
     parser.add_argument(
         "--model",
         type=str,
-        default="qwen3-vl:8b",
-        help="Ollama model for VLM analysis",
+        default=DEFAULT_VLM_MODEL,
+        help="mlx-vlm model for VLM analysis",
     )
 
     parser.add_argument(
