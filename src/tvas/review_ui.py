@@ -12,19 +12,8 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-# Toga is optional - the system can work without UI
-try:
-    import toga
-    from toga.style import Pack
-    from toga.style.pack import COLUMN, ROW
-
-    TOGA_AVAILABLE = True
-except ImportError:
-    TOGA_AVAILABLE = False
-    toga = None
-    Pack = None
-    COLUMN = None
-    ROW = None
+import toga
+from toga.style import Pack
 
 
 class UserDecision(Enum):
@@ -52,19 +41,10 @@ class ClipReviewItem:
     suggested_out_point: float | None = None
 
 
-def check_toga_available() -> bool:
-    """Check if Toga is available.
-
-    Returns:
-        True if Toga is available for UI.
-    """
-    return TOGA_AVAILABLE
-
-
 def create_review_app(
     clips: list[ClipReviewItem],
     on_complete: Callable[[list[ClipReviewItem]], None] | None = None,
-) -> "toga.App | None":
+) -> toga.App:
     """Create a Toga app for reviewing clips.
 
     Args:
@@ -72,12 +52,8 @@ def create_review_app(
         on_complete: Callback when user clicks "Generate Timeline".
 
     Returns:
-        Toga App instance, or None if Toga unavailable.
+        Toga App instance.
     """
-    if not TOGA_AVAILABLE:
-        logger.warning("Toga is not available - UI cannot be created")
-        return None
-
     class ReviewApp(toga.App):
         """Toga application for clip review."""
 
@@ -94,7 +70,7 @@ def create_review_app(
         def startup(self):
             """Build the main window."""
             # Main container
-            main_box = toga.Box(style=Pack(direction=COLUMN, padding=10))
+            main_box = toga.Box(style=Pack(direction="column", padding=10))
 
             # Header with stats
             stats = self._calculate_stats()
@@ -106,7 +82,7 @@ def create_review_app(
             main_box.add(self.stats_label)
 
             # Filter buttons
-            filter_box = toga.Box(style=Pack(direction=ROW, padding=(0, 0, 10, 0)))
+            filter_box = toga.Box(style=Pack(direction="row", padding=(0, 0, 10, 0)))
             filter_box.add(toga.Button("All", on_press=lambda w: self._set_filter("all")))
             filter_box.add(toga.Button("Keep", on_press=lambda w: self._set_filter("keep")))
             filter_box.add(toga.Button("Reject", on_press=lambda w: self._set_filter("reject")))
@@ -114,12 +90,12 @@ def create_review_app(
             main_box.add(filter_box)
 
             # Scrollable clip list
-            self.clip_container = toga.Box(style=Pack(direction=COLUMN, flex=1))
+            self.clip_container = toga.Box(style=Pack(direction="column", flex=1))
             scroll = toga.ScrollContainer(content=self.clip_container, style=Pack(flex=1))
             main_box.add(scroll)
 
             # Action buttons
-            action_box = toga.Box(style=Pack(direction=ROW, padding=(10, 0, 0, 0)))
+            action_box = toga.Box(style=Pack(direction="row", padding=(10, 0, 0, 0)))
             action_box.add(
                 toga.Button(
                     "Approve All AI Decisions",
@@ -140,9 +116,9 @@ def create_review_app(
             self._refresh_clips()
 
             # Create main window
-            self.main_window = toga.MainWindow(title="TVAS - Review Clips")
-            self.main_window.content = main_box
-            self.main_window.show()
+            self.main_window = toga.MainWindow(title="TVAS - Review Clips")  # type: ignore[assignment]
+            self.main_window.content = main_box  # type: ignore[attr-defined]
+            self.main_window.show()  # type: ignore[attr-defined]
 
         def _calculate_stats(self) -> dict:
             """Calculate clip statistics."""
@@ -174,7 +150,7 @@ def create_review_app(
                 item_box = self._create_clip_item(clip)
                 self.clip_container.add(item_box)
 
-        def _create_clip_item(self, clip: ClipReviewItem) -> toga.Box:
+        def _create_clip_item(self, clip: ClipReviewItem) -> toga.Box:  # type: ignore[name-defined]
             """Create a UI element for a clip."""
             # Determine border color based on AI decision
             if clip.ai_decision == "reject":
@@ -186,14 +162,14 @@ def create_review_app(
 
             item_box = toga.Box(
                 style=Pack(
-                    direction=ROW,
+                    direction="row",
                     padding=5,
                     background_color=bg_color,
                 )
             )
 
             # Clip info
-            info_box = toga.Box(style=Pack(direction=COLUMN, flex=1))
+            info_box = toga.Box(style=Pack(direction="column", flex=1))
             info_box.add(toga.Label(clip.source_path.name, style=Pack(font_weight="bold")))
             info_box.add(toga.Label(f"Camera: {clip.camera_name}"))
             info_box.add(toga.Label(f"Duration: {clip.duration_seconds:.1f}s"))
@@ -212,7 +188,7 @@ def create_review_app(
             item_box.add(info_box)
 
             # Action buttons
-            btn_box = toga.Box(style=Pack(direction=COLUMN, padding=(0, 0, 0, 10)))
+            btn_box = toga.Box(style=Pack(direction="column", padding=(0, 0, 0, 10)))
             btn_box.add(
                 toga.Button(
                     "Keep",
@@ -264,7 +240,7 @@ def create_review_app(
             logger.info("Generate Timeline clicked")
             if self.on_complete_cb:
                 self.on_complete_cb(self.clips)
-            self.main_window.close()
+            self.main_window.close()  # type: ignore[attr-defined]
 
     return ReviewApp(clips, on_complete)
 
@@ -284,16 +260,8 @@ def run_review_ui(
     Returns:
         Updated list of clips with user decisions.
     """
-    if not TOGA_AVAILABLE:
-        logger.warning("Toga unavailable - returning clips with default decisions")
-        for clip in clips:
-            clip.user_decision = UserDecision.APPROVE
-        return clips
-
     app = create_review_app(clips, on_complete)
-    if app:
-        app.main_loop()
-
+    app.main_loop()
     return clips
 
 
@@ -349,10 +317,6 @@ def show_notification(title: str, message: str) -> bool:
     Returns:
         True if notification was shown.
     """
-    if not TOGA_AVAILABLE:
-        logger.info(f"Notification: {title} - {message}")
-        return False
-
     # Toga notifications require a running app
     # For standalone notifications, we'd use a different approach
     logger.info(f"Notification: {title} - {message}")
