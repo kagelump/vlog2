@@ -7,7 +7,7 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 - **SD Card Detection**: Automatically detects camera SD cards (Sony A7C, DJI Pocket 3, iPhone, Insta360)
 - **Smart Ingestion**: Copies files with SHA256 verification and organized folder structure
 - **AI Analysis**: Uses Qwen3-VL (8B) via mlx-vlm for intelligent junk detection on Apple Silicon
-- **OpenCV Heuristics**: Fast blur and darkness detection for pre-screening
+- **OpenCV Pre-screening**: Fast blur and darkness detection before VLM analysis
 - **Review UI**: Native macOS UI (Toga) for reviewing AI decisions
 - **Timeline Generation**: Creates OpenTimelineIO files for DaVinci Resolve import
 
@@ -17,6 +17,7 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 
 - Python 3.11+
 - FFmpeg (for proxy generation and video analysis)
+- OpenCV (for frame extraction and pre-screening)
 - Apple Silicon Mac (M1/M2/M3/M4) - **required** for mlx-vlm VLM analysis
 
 ### macOS (Homebrew)

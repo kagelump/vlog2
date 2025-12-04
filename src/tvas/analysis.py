@@ -17,17 +17,8 @@ from tvas.proxy import get_video_duration
 
 logger = logging.getLogger(__name__)
 
-# OpenCV is optional - will gracefully degrade if not available
-try:
-    import cv2
-    import numpy as np
-
-    OPENCV_AVAILABLE = True
-except ImportError:
-    OPENCV_AVAILABLE = False
-    cv2 = None
-    np = None
-
+import cv2
+import numpy as np
 from mlx_vlm import load, generate
 from mlx_vlm.prompt_utils import apply_chat_template
 from mlx_vlm.utils import load_config
@@ -49,7 +40,6 @@ class JunkReason(Enum):
     LENS_CAP = "lens_cap"
     GROUND = "pointing_at_ground"
     ACCIDENTAL = "accidental_trigger"
-    LOW_AUDIO = "low_audio"
     MULTIPLE = "multiple_issues"
 
 
@@ -95,7 +85,6 @@ class ClipAnalysis:
     junk_reasons: list[JunkReason]
     suggested_in_point: float | None = None
     suggested_out_point: float | None = None
-    mean_audio_db: float | None = None
     vlm_summary: str | None = None
 
 
@@ -156,10 +145,6 @@ def extract_frames(
     output_dir.mkdir(parents=True, exist_ok=True)
     frames: list[tuple[float, Path]] = []
 
-    if not OPENCV_AVAILABLE:
-        logger.warning("OpenCV not available - using FFmpeg for frame extraction")
-        return _extract_frames_ffmpeg(video_path, output_dir, timestamps)
-
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         logger.error(f"Could not open video: {video_path}")
@@ -190,53 +175,6 @@ def extract_frames(
     return frames
 
 
-def _extract_frames_ffmpeg(
-    video_path: Path,
-    output_dir: Path,
-    timestamps: list[float] | None = None,
-) -> list[tuple[float, Path]]:
-    """Extract frames using FFmpeg (fallback when OpenCV unavailable).
-
-    Args:
-        video_path: Path to the video file.
-        output_dir: Directory to save extracted frames.
-        timestamps: List of timestamps in seconds.
-
-    Returns:
-        List of (timestamp, frame_path) tuples.
-    """
-    frames: list[tuple[float, Path]] = []
-
-    if timestamps is None:
-        timestamps = [0, 1, 2, 3]
-
-    for ts in timestamps:
-        frame_path = output_dir / f"frame_{ts:.1f}s.jpg"
-        cmd = [
-            "ffmpeg",
-            "-hide_banner",
-            "-y",
-            "-ss",
-            str(ts),
-            "-i",
-            str(video_path),
-            "-frames:v",
-            "1",
-            "-q:v",
-            "2",
-            str(frame_path),
-        ]
-
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if result.returncode == 0 and frame_path.exists():
-                frames.append((ts, frame_path))
-        except subprocess.SubprocessError:
-            logger.warning(f"Failed to extract frame at {ts}s")
-
-    return frames
-
-
 def calculate_blur_score(image_path: Path) -> float | None:
     """Calculate blur score using Laplacian variance.
 
@@ -248,9 +186,6 @@ def calculate_blur_score(image_path: Path) -> float | None:
     Returns:
         Blur score (Laplacian variance), or None if unable to calculate.
     """
-    if not OPENCV_AVAILABLE:
-        return None
-
     img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if img is None:
         return None
@@ -272,9 +207,6 @@ def calculate_brightness_score(image_path: Path) -> float | None:
     Returns:
         Mean brightness score, or None if unable to calculate.
     """
-    if not OPENCV_AVAILABLE:
-        return None
-
     img = cv2.imread(str(image_path))
     if img is None:
         return None
@@ -329,7 +261,7 @@ def analyze_frame_vlm(
         Dictionary with VLM analysis results.
     """
     model, processor, config = _get_or_load_model(model_name)
-    if model is None:
+    if model is None or processor is None or config is None:
         raise RuntimeError(f"Failed to load model: {model_name}")
 
     prompt = """Analyze this video frame for quality issues. 
@@ -346,16 +278,24 @@ Be conservative - only mark as junk if there are clear quality issues."""
         formatted_prompt = apply_chat_template(
             processor, config, prompt, num_images=1
         )
+        
+        # Ensure formatted_prompt is a string (it can be list, str, or Any from apply_chat_template)
+        if isinstance(formatted_prompt, list):
+            # If it's a list of dicts (chat format), convert to string representation
+            formatted_prompt = str(formatted_prompt)
 
-        # Generate response
-        response_text = generate(
+        # Generate response (returns GenerationResult object)
+        result = generate(
             model,
             processor,
-            formatted_prompt,
+            formatted_prompt,  # type: ignore[arg-type]
             [str(frame_path)],
             verbose=False,
             max_tokens=256,
         )
+        
+        # Extract text from result (GenerationResult has a text attribute or is convertible to str)
+        response_text = str(result) if not hasattr(result, 'text') else result.text
 
         # Try to parse JSON from response
         try:
@@ -395,49 +335,6 @@ Be conservative - only mark as junk if there are clear quality issues."""
         "issues": [],
         "raw_response": None,
     }
-
-
-def get_audio_level(video_path: Path) -> float | None:
-    """Get mean audio level of a video using FFmpeg volumedetect.
-
-    Args:
-        video_path: Path to the video file.
-
-    Returns:
-        Mean volume in dB, or None if unable to determine.
-    """
-    try:
-        cmd = [
-            "ffmpeg",
-            "-hide_banner",
-            "-i",
-            str(video_path),
-            "-af",
-            "volumedetect",
-            "-f",
-            "null",
-            "-",
-        ]
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-
-        # Parse mean_volume from stderr
-        for line in result.stderr.split("\n"):
-            if "mean_volume:" in line:
-                # Extract number: "mean_volume: -30.5 dB"
-                parts = line.split("mean_volume:")[-1].strip().split()
-                if parts:
-                    return float(parts[0])
-
-    except (subprocess.SubprocessError, ValueError, IndexError):
-        pass
-
-    return None
 
 
 def analyze_clip(
@@ -525,16 +422,9 @@ def analyze_clip(
 
             all_junk_reasons.extend(junk_reasons)
 
-    # Get audio level
-    mean_audio_db = get_audio_level(source_path)
-
-    # Check for low audio (possible accidental recording)
-    if mean_audio_db is not None and mean_audio_db < -40:
-        all_junk_reasons.append(JunkReason.LOW_AUDIO)
-
     # Decision logic
     decision, confidence, in_point, out_point = _make_decision(
-        frame_analyses, duration, mean_audio_db
+        frame_analyses, duration
     )
 
     # Deduplicate reasons
@@ -550,14 +440,12 @@ def analyze_clip(
         junk_reasons=unique_reasons,
         suggested_in_point=in_point,
         suggested_out_point=out_point,
-        mean_audio_db=mean_audio_db,
     )
 
 
 def _make_decision(
     frame_analyses: list[FrameAnalysis],
     duration: float,
-    mean_audio_db: float | None,
 ) -> tuple[ClipDecision, ConfidenceLevel, float | None, float | None]:
     """Make a decision about a clip based on frame analyses.
 
@@ -569,7 +457,6 @@ def _make_decision(
     Args:
         frame_analyses: List of frame analysis results.
         duration: Clip duration in seconds.
-        mean_audio_db: Mean audio level.
 
     Returns:
         Tuple of (decision, confidence, suggested_in_point, suggested_out_point).
@@ -613,12 +500,6 @@ def _make_decision(
     # If most end frames are junk, suggest trimming
     if end_junk >= 3 or (len(end_frames) > 0 and end_junk / len(end_frames) > 0.5):
         out_point = max(0, duration - 3.0)
-
-    # Check for very low audio
-    if mean_audio_db is not None and mean_audio_db < -50:
-        # Very quiet - likely accidental
-        confidence = ConfidenceLevel.LOW
-        return ClipDecision.REVIEW, confidence, in_point, out_point
 
     # If any trimming suggested, mark for review
     if in_point is not None or out_point is not None:
