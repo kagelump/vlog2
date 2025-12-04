@@ -151,6 +151,22 @@ class TVASApp:
         # Determine cache directory (always on local proxy_path)
         cache_dir = self.proxy_path / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}" / ".cache"
 
+        # Stage 2a: Generate edit proxies (ProRes for smooth editing)
+        try:
+            edit_proxy_results = generate_proxies_batch(
+                source_files,
+                cache_dir,
+                ProxyType.EDIT_PROXY,
+                ProxyConfig(use_hardware_accel=True),
+            )
+            successful_edit_proxies = [r for r in edit_proxy_results if r.success]
+            logger.info(f"Generated {len(successful_edit_proxies)}/{len(edit_proxy_results)} edit proxies")
+        except Exception as e:
+            results["errors"].append(f"Edit proxy generation failed: {e}")
+            logger.error(f"Edit proxy generation failed: {e}")
+            edit_proxy_results = []
+
+        # Stage 2b: Generate AI proxies (low-res for VLM analysis)
         try:
             proxy_results = generate_proxies_batch(
                 source_files,
@@ -159,10 +175,10 @@ class TVASApp:
                 ProxyConfig(use_hardware_accel=True),
             )
             successful_proxies = [r for r in proxy_results if r.success]
-            logger.info(f"Generated {len(successful_proxies)}/{len(proxy_results)} proxies")
+            logger.info(f"Generated {len(successful_proxies)}/{len(proxy_results)} AI proxies")
         except Exception as e:
-            results["errors"].append(f"Proxy generation failed: {e}")
-            logger.error(f"Proxy generation failed: {e}")
+            results["errors"].append(f"AI proxy generation failed: {e}")
+            logger.error(f"AI proxy generation failed: {e}")
             # Continue without proxies - will analyze originals
             proxy_results = []
 

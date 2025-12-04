@@ -18,11 +18,30 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration in human-readable format.
+    
+    Args:
+        seconds: Duration in seconds.
+    
+    Returns:
+        Formatted string (e.g., "1:23:45", "2:15").
+    """
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    else:
+        return f"{minutes}:{secs:02d}"
+
+
 class ProxyType(Enum):
     """Types of proxy videos."""
 
-    AI_PROXY = "ai_proxy"  # 640px wide, 10fps, 500kbps - for VLM analysis
     EDIT_PROXY = "edit_proxy"  # ProRes Proxy - for smooth editing
+    AI_PROXY = "ai_proxy"  # 640px wide, 12fps, 500kbps - for VLM analysis
 
 
 @dataclass
@@ -30,11 +49,11 @@ class ProxyConfig:
     """Configuration for proxy generation."""
 
     width: int = 640  # AI proxy width
-    framerate: int = 10  # AI proxy framerate
+    framerate: int = 12  # AI proxy framerate
     bitrate: str = "500k"  # AI proxy bitrate
     use_hardware_accel: bool = True  # Use videotoolbox on macOS
     batch_size: int = 5  # Files per batch
-    cooldown_seconds: int = 30  # Cooldown between batches
+    cooldown_seconds: int = 30 # Cooldown between batches
     max_temp_celsius: int = 95  # Maximum CPU temperature
 
 
@@ -89,7 +108,7 @@ def build_ai_proxy_command(
 
     AI Proxy specs:
     - Resolution: 640px wide (maintains aspect ratio)
-    - Framerate: 10fps
+    - Framerate: 12fps
     - Bitrate: 500kbps
     - Audio: Stripped
 
@@ -193,13 +212,44 @@ def generate_proxy(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Check if proxy already exists with correct duration
+    if output_path.exists():
+        source_duration = get_video_duration(source_path)
+        proxy_duration = get_video_duration(output_path)
+        
+        if source_duration and proxy_duration:
+            # Allow 2% tolerance for duration differences (framerate adjustments, encoding)
+            duration_diff = abs(source_duration - proxy_duration)
+            tolerance = source_duration * 0.02  # 2% tolerance
+            
+            if duration_diff <= tolerance:
+                logger.info(f"Skipping {source_path.name} - proxy already exists with correct duration ({format_duration(proxy_duration)})")
+                return ProxyResult(
+                    source_path=source_path,
+                    proxy_path=output_path,
+                    proxy_type=proxy_type,
+                    success=True,
+                    duration_seconds=0.0,  # No processing time since skipped
+                )
+            else:
+                logger.warning(f"Proxy exists but duration mismatch (source: {format_duration(source_duration)}, proxy: {format_duration(proxy_duration)}), regenerating...")
+                output_path.unlink()  # Remove incorrect proxy
+        else:
+            # Can't determine duration, regenerate to be safe
+            logger.warning(f"Proxy exists but duration check failed, regenerating...")
+            output_path.unlink()
+
     # Build appropriate command
     if proxy_type == ProxyType.AI_PROXY:
         cmd = build_ai_proxy_command(source_path, output_path, config)
     else:
         cmd = build_edit_proxy_command(source_path, output_path)
 
-    logger.info(f"Generating {proxy_type.value} for {source_path.name}")
+    # Get video duration for logging
+    video_duration = get_video_duration(source_path)
+    duration_str = f" ({format_duration(video_duration)})" if video_duration else ""
+    
+    logger.info(f"Generating {proxy_type.value} for {source_path.name}{duration_str}")
     logger.debug(f"FFmpeg command: {' '.join(cmd)}")
 
     start_time = time.time()
@@ -283,6 +333,7 @@ def generate_proxies_batch(
 
     results: list[ProxyResult] = []
     batch_count = 0
+    processed_count = 0  # Track actually processed (not skipped) videos
 
     for i, source_path in enumerate(source_files):
         # Generate proxy
@@ -290,12 +341,28 @@ def generate_proxies_batch(
         results.append(result)
 
         batch_count += 1
+        
+        # Only count as processed if ffmpeg actually ran (duration > 0)
+        if result.success and result.duration_seconds > 0:
+            processed_count += 1
 
-        # Thermal management: cooldown after each batch
+        # Thermal management: cooldown after each batch, scaled by actual work done
+        # No cooldown needed if using hardware acceleration (GPU doesn't overheat like CPU)
         if batch_count >= config.batch_size and i < len(source_files) - 1:
-            logger.info(f"Batch complete. Cooling down for {config.cooldown_seconds}s...")
-            time.sleep(config.cooldown_seconds)
+            # Skip cooldown if hardware acceleration is enabled
+            if config.use_hardware_accel and check_videotoolbox_available():
+                logger.info(f"Batch complete ({processed_count} processed, {batch_count - processed_count} skipped). No cooldown needed (hardware acceleration).")
+            # Scale cooldown: 0 processed = no cooldown, full batch = full cooldown
+            elif processed_count > 0:
+                cooldown_ratio = processed_count / config.batch_size
+                scaled_cooldown = int(config.cooldown_seconds * cooldown_ratio)
+                logger.info(f"Batch complete ({processed_count} processed, {batch_count - processed_count} skipped). Cooling down for {scaled_cooldown}s...")
+                time.sleep(scaled_cooldown)
+            else:
+                logger.info(f"Batch complete (all {batch_count} skipped). No cooldown needed.")
+            
             batch_count = 0
+            processed_count = 0
 
     successful = sum(1 for r in results if r.success)
     logger.info(f"Proxy generation complete: {successful}/{len(results)} successful")
