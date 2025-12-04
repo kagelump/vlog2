@@ -28,19 +28,9 @@ except ImportError:
     cv2 = None
     np = None
 
-# mlx-vlm is optional - will gracefully degrade if not available
-try:
-    from mlx_vlm import load, generate
-    from mlx_vlm.prompt_utils import apply_chat_template
-    from mlx_vlm.utils import load_config
-
-    MLX_VLM_AVAILABLE = True
-except ImportError:
-    MLX_VLM_AVAILABLE = False
-    load = None
-    generate = None
-    apply_chat_template = None
-    load_config = None
+from mlx_vlm import load, generate
+from mlx_vlm.prompt_utils import apply_chat_template
+from mlx_vlm.utils import load_config
 
 # Default model for mlx-vlm
 DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
@@ -109,28 +99,19 @@ class ClipAnalysis:
     vlm_summary: str | None = None
 
 
-def check_mlx_vlm_available() -> bool:
-    """Check if mlx-vlm is available on the system.
-
-    Returns:
-        True if mlx-vlm is available and can be used.
-    """
-    return MLX_VLM_AVAILABLE
-
-
 def check_model_available(model_name: str = DEFAULT_VLM_MODEL) -> bool:
     """Check if the specified model can be loaded.
 
     Note: mlx-vlm models are downloaded automatically on first use
-    from HuggingFace. This function checks if mlx-vlm is available.
+    from HuggingFace.
 
     Args:
         model_name: Name of the mlx-vlm model.
 
     Returns:
-        True if mlx-vlm is available (model will be downloaded if needed).
+        True (model will be downloaded if needed).
     """
-    return MLX_VLM_AVAILABLE
+    return True
 
 
 def _get_or_load_model(model_name: str = DEFAULT_VLM_MODEL):
@@ -140,11 +121,8 @@ def _get_or_load_model(model_name: str = DEFAULT_VLM_MODEL):
         model_name: Name of the mlx-vlm model.
 
     Returns:
-        Tuple of (model, processor, config) or (None, None, None) if unavailable.
+        Tuple of (model, processor, config).
     """
-    if not MLX_VLM_AVAILABLE:
-        return None, None, None
-
     with _model_cache_lock:
         if model_name not in _model_cache:
             try:
@@ -350,23 +328,9 @@ def analyze_frame_vlm(
     Returns:
         Dictionary with VLM analysis results.
     """
-    if not MLX_VLM_AVAILABLE:
-        logger.warning("mlx-vlm not available - skipping VLM analysis")
-        return {
-            "is_junk": False,
-            "reason": "mlx-vlm not available",
-            "issues": [],
-            "raw_response": None,
-        }
-
     model, processor, config = _get_or_load_model(model_name)
     if model is None:
-        return {
-            "is_junk": False,
-            "reason": "Failed to load model",
-            "issues": [],
-            "raw_response": None,
-        }
+        raise RuntimeError(f"Failed to load model: {model_name}")
 
     prompt = """Analyze this video frame for quality issues. 
 Look for: blur/motion blur, camera pointing at ground, lens cap covering lens, 
@@ -512,9 +476,9 @@ def analyze_clip(
             # OpenCV analysis
             cv_result = analyze_frame_opencv(frame_path)
 
-            # VLM analysis (if enabled and available)
+            # VLM analysis (if enabled)
             vlm_result = None
-            if use_vlm and check_mlx_vlm_available():
+            if use_vlm:
                 vlm_result = analyze_frame_vlm(frame_path, model_name)
 
             # Combine results

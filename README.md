@@ -17,7 +17,7 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 
 - Python 3.11+
 - FFmpeg (for proxy generation and video analysis)
-- Apple Silicon Mac (M1/M2/M3/M4) for VLM-based analysis with mlx-vlm
+- Apple Silicon Mac (M1/M2/M3/M4) - **required** for mlx-vlm VLM analysis
 
 ### macOS (Homebrew)
 
@@ -25,11 +25,11 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 # Install system dependencies
 brew install python@3.11 ffmpeg
 
-# Install TVAS (with all features including VLM)
+# Install TVAS with all features
 pip install -e ".[full]"
 ```
 
-The VLM model (`mlx-community/Qwen3-VL-8B-Instruct-8bit`) will be automatically downloaded from HuggingFace on first use.
+The VLM model (`mlx-community/Qwen3-VL-8B-Instruct-8bit`) will be automatically downloaded from HuggingFace on first use (~6GB).
 
 ### Install from Source
 
@@ -38,12 +38,6 @@ git clone https://github.com/kagelump/vlog2.git
 cd vlog2
 pip install -e ".[full]"
 ```
-
-### Optional Dependencies
-
-- **VLM only**: `pip install -e ".[vlm]"` - For AI-powered junk detection
-- **CV only**: `pip install -e ".[cv]"` - For OpenCV-based analysis
-- **UI only**: `pip install -e ".[ui]"` - For the native macOS review UI
 
 ## Usage
 
