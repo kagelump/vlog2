@@ -1,33 +1,33 @@
 """Stage 3: AI Analysis (Junk Detection)
 
 This module handles AI-powered junk detection using Qwen3 VL (8B) via mlx-vlm,
-combined with OpenCV heuristics for blur and darkness detection.
+using native video processing for start/end point detection.
 """
 
 import json
 import logging
-import subprocess
-import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+import mlx.core as mx
+from mlx_vlm import load
+from mlx_vlm.video_generate import process_vision_info
 
 from tvas.proxy import get_video_duration
 
 logger = logging.getLogger(__name__)
 
-import cv2
-import numpy as np
-from mlx_vlm import load, generate
-from mlx_vlm.prompt_utils import apply_chat_template
-from mlx_vlm.utils import load_config
-
 # Default model for mlx-vlm
 DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
 
-# Cache for loaded models to avoid reloading on each frame
-# Structure: {model_name: (model, processor, config)}
+# Video sampling parameters
+VIDEO_FPS = 10.0  # Sample at 10fps for analysis
+VIDEO_SEGMENT_DURATION = 5.0  # Analyze first/last 5 seconds
+
+# Cache for loaded models to avoid reloading
+# Structure: {model_name: (model, processor)}
 _model_cache: dict[str, tuple] = {}
 _model_cache_lock = threading.Lock()
 
@@ -46,9 +46,9 @@ class JunkReason(Enum):
 class ConfidenceLevel(Enum):
     """Confidence level of junk detection."""
 
-    HIGH = "high"  # OpenCV + VLM agree
-    MEDIUM = "medium"  # VLM only
-    LOW = "low"  # OpenCV only
+    HIGH = "high"  # VLM with clear reasoning
+    MEDIUM = "medium"  # VLM with uncertain reasoning
+    LOW = "low"  # VLM failed or unclear
 
 
 class ClipDecision(Enum):
@@ -60,31 +60,18 @@ class ClipDecision(Enum):
 
 
 @dataclass
-class FrameAnalysis:
-    """Analysis result for a single frame."""
-
-    frame_index: int
-    timestamp_seconds: float
-    is_junk: bool
-    junk_reasons: list[JunkReason] = field(default_factory=list)
-    blur_score: float | None = None
-    brightness_score: float | None = None
-    vlm_response: str | None = None
-
-
-@dataclass
 class ClipAnalysis:
     """Complete analysis result for a video clip."""
 
     source_path: Path
     proxy_path: Path | None
     duration_seconds: float
-    frame_analyses: list[FrameAnalysis]
     decision: ClipDecision
     confidence: ConfidenceLevel
     junk_reasons: list[JunkReason]
     suggested_in_point: float | None = None
     suggested_out_point: float | None = None
+    vlm_response: str | None = None
     vlm_summary: str | None = None
 
 
@@ -110,196 +97,142 @@ def _get_or_load_model(model_name: str = DEFAULT_VLM_MODEL):
         model_name: Name of the mlx-vlm model.
 
     Returns:
-        Tuple of (model, processor, config).
+        Tuple of (model, processor).
     """
     with _model_cache_lock:
         if model_name not in _model_cache:
             try:
                 logger.info(f"Loading mlx-vlm model: {model_name}")
                 model, processor = load(model_name)
-                config = load_config(model_name)
-                _model_cache[model_name] = (model, processor, config)
+                _model_cache[model_name] = (model, processor)
                 logger.info(f"Model {model_name} loaded successfully")
             except Exception as e:
                 logger.error(f"Failed to load model {model_name}: {e}")
-                return None, None, None
+                return None, None
 
         return _model_cache[model_name]
 
 
-def extract_frames(
+def analyze_video_segment(
     video_path: Path,
-    output_dir: Path,
-    timestamps: list[float] | None = None,
-) -> list[tuple[float, Path]]:
-    """Extract frames from a video at specified timestamps.
-
-    Args:
-        video_path: Path to the video file.
-        output_dir: Directory to save extracted frames.
-        timestamps: List of timestamps in seconds. If None, uses default sampling.
-
-    Returns:
-        List of (timestamp, frame_path) tuples.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    frames: list[tuple[float, Path]] = []
-
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        logger.error(f"Could not open video: {video_path}")
-        return frames
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = total_frames / fps if fps > 0 else 0
-
-    # Default timestamps: start (0-3s) and end (last 3s)
-    if timestamps is None:
-        timestamps = [0, 1, 2, 3]
-        if duration > 6:
-            timestamps.extend([duration - 3, duration - 2, duration - 1, max(0, duration - 0.1)])
-
-    for ts in timestamps:
-        frame_num = int(ts * fps)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-        ret, frame = cap.read()
-
-        if ret:
-            frame_path = output_dir / f"frame_{ts:.1f}s.jpg"
-            cv2.imwrite(str(frame_path), frame)
-            frames.append((ts, frame_path))
-            logger.debug(f"Extracted frame at {ts}s")
-
-    cap.release()
-    return frames
-
-
-def calculate_blur_score(image_path: Path) -> float | None:
-    """Calculate blur score using Laplacian variance.
-
-    Higher score = sharper image, lower score = more blur.
-
-    Args:
-        image_path: Path to the image file.
-
-    Returns:
-        Blur score (Laplacian variance), or None if unable to calculate.
-    """
-    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        return None
-
-    laplacian = cv2.Laplacian(img, cv2.CV_64F)
-    variance = laplacian.var()
-
-    return float(variance)
-
-
-def calculate_brightness_score(image_path: Path) -> float | None:
-    """Calculate brightness score using HSV value channel.
-
-    Returns mean brightness (0-255).
-
-    Args:
-        image_path: Path to the image file.
-
-    Returns:
-        Mean brightness score, or None if unable to calculate.
-    """
-    img = cv2.imread(str(image_path))
-    if img is None:
-        return None
-
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    brightness = hsv[:, :, 2].mean()
-
-    return float(brightness)
-
-
-def analyze_frame_opencv(frame_path: Path) -> dict:
-    """Analyze a frame using OpenCV heuristics.
-
-    Args:
-        frame_path: Path to the frame image.
-
-    Returns:
-        Dictionary with analysis results.
-    """
-    blur_score = calculate_blur_score(frame_path)
-    brightness_score = calculate_brightness_score(frame_path)
-
-    is_blurry = blur_score is not None and blur_score < 100
-    is_dark = brightness_score is not None and brightness_score < 30
-
-    reasons = []
-    if is_blurry:
-        reasons.append(JunkReason.BLUR)
-    if is_dark:
-        reasons.append(JunkReason.DARKNESS)
-
-    return {
-        "blur_score": blur_score,
-        "brightness_score": brightness_score,
-        "is_blurry": is_blurry,
-        "is_dark": is_dark,
-        "junk_reasons": reasons,
-    }
-
-
-def analyze_frame_vlm(
-    frame_path: Path,
     model_name: str = DEFAULT_VLM_MODEL,
+    fps: float = VIDEO_FPS,
+    max_pixels: int = 224 * 224,
 ) -> dict:
-    """Analyze a frame using Vision Language Model via mlx-vlm.
+    """Analyze a video segment using VLM for junk detection and trim suggestions.
 
     Args:
-        frame_path: Path to the frame image.
+        video_path: Path to the video file (can be proxy or original).
         model_name: Name of the mlx-vlm model to use.
+        fps: Frames per second to sample from video.
+        max_pixels: Maximum pixels for each frame.
 
     Returns:
-        Dictionary with VLM analysis results.
+        Dictionary with VLM analysis results including trim suggestions.
     """
-    model, processor, config = _get_or_load_model(model_name)
-    if model is None or processor is None or config is None:
+    model, processor = _get_or_load_model(model_name)
+    if model is None or processor is None:
         raise RuntimeError(f"Failed to load model: {model_name}")
 
-    prompt = """Analyze this video frame for quality issues. 
-Look for: blur/motion blur, camera pointing at ground, lens cap covering lens, 
-extremely dark/black frames, accidental recording triggers.
+    # Get video duration to determine segment strategy
+    duration = get_video_duration(video_path) or 0
+    
+    # Determine analysis strategy
+    if duration <= 15:
+        # Short video: analyze entire clip
+        prompt = f"""Analyze this {duration:.1f}s video clip for quality issues.
+Look for: blur/motion blur, camera pointing at ground, lens cap, extremely dark frames, accidental triggers.
 
-Respond with ONLY valid JSON in this exact format:
-{"is_junk": true/false, "reason": "brief explanation", "issues": ["list", "of", "issues"]}
+Based on your analysis, provide:
+1. Whether any part should be trimmed (is_junk: true/false)
+2. Specific issues found (issues: list)
+3. Recommended start time in seconds (trim_start: number or null if no trim needed at start)
+4. Recommended end time in seconds (trim_end: number or null if no trim needed at end)
 
-Be conservative - only mark as junk if there are clear quality issues."""
+Respond with ONLY valid JSON:
+{{"is_junk": true/false, "reason": "brief explanation", "issues": ["list"], "trim_start": null or number, "trim_end": null or number}}
+
+Be conservative - only suggest trimming if there are clear quality issues."""
+    else:
+        # Long video: focus on first/last 5 seconds
+        prompt = f"""Analyze the beginning and end of this {duration:.1f}s video clip.
+Look for quality issues in the FIRST and LAST few seconds: blur, camera pointing at ground, lens cap, dark frames, accidental triggers.
+
+Based on your analysis, provide:
+1. Whether the start needs trimming (check first ~5 seconds)
+2. Whether the end needs trimming (check last ~5 seconds)
+3. Recommended start time in seconds if start has issues (trim_start: number or null)
+4. Recommended end time in seconds if end has issues (trim_end: number or null)
+
+Respond with ONLY valid JSON:
+{{"is_junk": true/false, "reason": "brief explanation", "issues": ["list"], "trim_start": null or number, "trim_end": null or number}}
+
+Example: If first 3 seconds are junk, set trim_start to 3.0. If last 4 seconds are junk and video is 60s, set trim_end to 56.0."""
 
     try:
-        # Format the prompt using mlx-vlm's chat template
-        formatted_prompt = apply_chat_template(
-            processor, config, prompt, num_images=1
+        # Prepare video input for mlx-vlm
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": str(video_path),
+                        "fps": fps,
+                        "max_pixels": max_pixels,
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+
+        # Process with mlx-vlm
+        text = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
         )
         
-        # Ensure formatted_prompt is a string (it can be list, str, or Any from apply_chat_template)
-        if isinstance(formatted_prompt, list):
-            # If it's a list of dicts (chat format), convert to string representation
-            formatted_prompt = str(formatted_prompt)
+        image_inputs, video_inputs, video_kwargs = process_vision_info(messages, True)
+        
+        inputs = processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        )
 
-        # Generate response (returns GenerationResult object)
-        result = generate(
+        input_ids = mx.array(inputs["input_ids"])
+        pixel_values = mx.array(
+            inputs.get("pixel_values_videos", inputs.get("pixel_values"))
+        )
+        mask = mx.array(inputs["attention_mask"])
+
+        # Prepare kwargs for generation
+        gen_kwargs = {}
+        if inputs.get("video_grid_thw") is not None:
+            gen_kwargs["video_grid_thw"] = mx.array(inputs["video_grid_thw"])
+        if inputs.get("image_grid_thw") is not None:
+            gen_kwargs["image_grid_thw"] = mx.array(inputs["image_grid_thw"])
+
+        # Generate response
+        from mlx_vlm.generate import generate as mlx_generate
+        
+        output = mlx_generate(
             model,
             processor,
-            formatted_prompt,  # type: ignore[arg-type]
-            [str(frame_path)],
+            input_ids,  # type: ignore[arg-type]
+            pixel_values,  # type: ignore[arg-type]
+            max_tokens=512,
             verbose=False,
-            max_tokens=256,
+            mask=mask,
+            **gen_kwargs,
         )
-        
-        # Extract text from result (GenerationResult has a text attribute or is convertible to str)
-        response_text = str(result) if not hasattr(result, 'text') else result.text
+
+        # Extract text from GenerationResult
+        response_text = str(output)
 
         # Try to parse JSON from response
         try:
-            # Find JSON in response (model might add extra text)
             start = response_text.find("{")
             end = response_text.rfind("}") + 1
             if start >= 0 and end > start:
@@ -309,32 +242,30 @@ Be conservative - only mark as junk if there are clear quality issues."""
                     "is_junk": data.get("is_junk", False),
                     "reason": data.get("reason", ""),
                     "issues": data.get("issues", []),
+                    "trim_start": data.get("trim_start"),
+                    "trim_end": data.get("trim_end"),
                     "raw_response": response_text,
                 }
         except json.JSONDecodeError:
-            pass
+            logger.warning(f"Failed to parse JSON from VLM response: {response_text[:200]}")
 
         # Fallback: simple keyword detection
         is_junk = any(
             word in response_text.lower()
-            for word in ["junk", "blur", "dark", "ground", "accidental"]
+            for word in ["junk", "blur", "dark", "ground", "accidental", "trim"]
         )
         return {
             "is_junk": is_junk,
             "reason": response_text[:200],
             "issues": [],
+            "trim_start": None,
+            "trim_end": None,
             "raw_response": response_text,
         }
 
     except Exception as e:
-        logger.error(f"VLM analysis failed for {frame_path}: {e}")
-
-    return {
-        "is_junk": False,
-        "reason": "VLM analysis unavailable",
-        "issues": [],
-        "raw_response": None,
-    }
+        logger.error(f"VLM analysis failed for {video_path}: {e}")
+        raise
 
 
 def analyze_clip(
@@ -343,173 +274,85 @@ def analyze_clip(
     use_vlm: bool = True,
     model_name: str = DEFAULT_VLM_MODEL,
 ) -> ClipAnalysis:
-    """Perform complete analysis of a video clip.
-
-    Combines OpenCV heuristics and VLM analysis to detect junk clips.
+    """Perform complete analysis of a video clip using VLM.
 
     Args:
         source_path: Path to the original video file.
         proxy_path: Path to the AI proxy (preferred for analysis).
-        use_vlm: Whether to use VLM for analysis.
+        use_vlm: Whether to use VLM for analysis (must be True).
         model_name: mlx-vlm model name for VLM analysis.
 
     Returns:
         ClipAnalysis with complete analysis results.
     """
-    video_to_analyze = proxy_path if proxy_path and proxy_path.exists() else source_path
+    if not use_vlm:
+        logger.warning("VLM is required for analysis - enabling it")
+        use_vlm = True
 
-    # Get video duration
+    video_to_analyze = proxy_path if proxy_path and proxy_path.exists() else source_path
     duration = get_video_duration(video_to_analyze) or 0
 
-    # Extract frames for analysis
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-        frames = extract_frames(video_to_analyze, temp_path)
+    # Analyze video with VLM
+    vlm_result = analyze_video_segment(video_to_analyze, model_name)
 
-        frame_analyses: list[FrameAnalysis] = []
-        all_junk_reasons: list[JunkReason] = []
+    # Parse junk reasons from issues
+    junk_reasons: list[JunkReason] = []
+    for issue in vlm_result.get("issues", []):
+        issue_lower = issue.lower()
+        if "blur" in issue_lower:
+            junk_reasons.append(JunkReason.BLUR)
+        elif "dark" in issue_lower:
+            junk_reasons.append(JunkReason.DARKNESS)
+        elif "ground" in issue_lower:
+            junk_reasons.append(JunkReason.GROUND)
+        elif "lens" in issue_lower or "cap" in issue_lower:
+            junk_reasons.append(JunkReason.LENS_CAP)
+        elif "accidental" in issue_lower:
+            junk_reasons.append(JunkReason.ACCIDENTAL)
 
-        for timestamp, frame_path in frames:
-            # OpenCV analysis
-            cv_result = analyze_frame_opencv(frame_path)
+    # If multiple issues, add that reason
+    if len(junk_reasons) > 1:
+        junk_reasons.append(JunkReason.MULTIPLE)
 
-            # VLM analysis (if enabled)
-            vlm_result = None
-            if use_vlm:
-                vlm_result = analyze_frame_vlm(frame_path, model_name)
+    # Determine trim points from VLM suggestions
+    trim_start = vlm_result.get("trim_start")
+    trim_end = vlm_result.get("trim_end")
 
-            # Combine results
-            is_junk = False
-            junk_reasons: list[JunkReason] = []
-
-            # OpenCV findings
-            if cv_result.get("is_blurry"):
-                junk_reasons.append(JunkReason.BLUR)
-                is_junk = True
-            if cv_result.get("is_dark"):
-                junk_reasons.append(JunkReason.DARKNESS)
-                is_junk = True
-
-            # VLM findings
-            if vlm_result and vlm_result.get("is_junk"):
-                is_junk = True
-                for issue in vlm_result.get("issues", []):
-                    issue_lower = issue.lower()
-                    if "blur" in issue_lower:
-                        if JunkReason.BLUR not in junk_reasons:
-                            junk_reasons.append(JunkReason.BLUR)
-                    elif "dark" in issue_lower:
-                        if JunkReason.DARKNESS not in junk_reasons:
-                            junk_reasons.append(JunkReason.DARKNESS)
-                    elif "ground" in issue_lower:
-                        junk_reasons.append(JunkReason.GROUND)
-                    elif "lens" in issue_lower or "cap" in issue_lower:
-                        junk_reasons.append(JunkReason.LENS_CAP)
-                    elif "accidental" in issue_lower:
-                        junk_reasons.append(JunkReason.ACCIDENTAL)
-
-            frame_analyses.append(
-                FrameAnalysis(
-                    frame_index=len(frame_analyses),
-                    timestamp_seconds=timestamp,
-                    is_junk=is_junk,
-                    junk_reasons=junk_reasons,
-                    blur_score=cv_result.get("blur_score"),
-                    brightness_score=cv_result.get("brightness_score"),
-                    vlm_response=vlm_result.get("raw_response") if vlm_result else None,
-                )
-            )
-
-            all_junk_reasons.extend(junk_reasons)
-
-    # Decision logic
-    decision, confidence, in_point, out_point = _make_decision(
-        frame_analyses, duration
-    )
+    # Determine decision based on VLM output
+    is_junk = vlm_result.get("is_junk", False)
+    
+    if is_junk and (trim_start is None and trim_end is None):
+        # Entire clip flagged as junk
+        decision = ClipDecision.REJECT
+        confidence = ConfidenceLevel.HIGH
+    elif trim_start is not None or trim_end is not None:
+        # Partial trim suggested
+        decision = ClipDecision.REVIEW
+        confidence = ConfidenceLevel.HIGH if junk_reasons else ConfidenceLevel.MEDIUM
+    elif is_junk:
+        # Marked as junk but no specific trim points
+        decision = ClipDecision.REVIEW
+        confidence = ConfidenceLevel.MEDIUM
+    else:
+        # Clean clip
+        decision = ClipDecision.KEEP
+        confidence = ConfidenceLevel.HIGH
 
     # Deduplicate reasons
-    unique_reasons = list(set(all_junk_reasons))
+    unique_reasons = list(set(junk_reasons))
 
     return ClipAnalysis(
         source_path=source_path,
         proxy_path=proxy_path,
         duration_seconds=duration,
-        frame_analyses=frame_analyses,
         decision=decision,
         confidence=confidence,
         junk_reasons=unique_reasons,
-        suggested_in_point=in_point,
-        suggested_out_point=out_point,
+        suggested_in_point=trim_start,
+        suggested_out_point=trim_end,
+        vlm_response=vlm_result.get("raw_response"),
+        vlm_summary=vlm_result.get("reason"),
     )
-
-
-def _make_decision(
-    frame_analyses: list[FrameAnalysis],
-    duration: float,
-) -> tuple[ClipDecision, ConfidenceLevel, float | None, float | None]:
-    """Make a decision about a clip based on frame analyses.
-
-    Decision logic:
-    - If 3+ frames at start are junk: Set In_Point to 3.0s
-    - If 3+ frames at end are junk: Set Out_Point to End-3s
-    - If >50% of clip is junk: Flag entire clip as "Rejected"
-
-    Args:
-        frame_analyses: List of frame analysis results.
-        duration: Clip duration in seconds.
-
-    Returns:
-        Tuple of (decision, confidence, suggested_in_point, suggested_out_point).
-    """
-    if not frame_analyses:
-        return ClipDecision.KEEP, ConfidenceLevel.LOW, None, None
-
-    # Count junk frames
-    junk_count = sum(1 for fa in frame_analyses if fa.is_junk)
-    junk_ratio = junk_count / len(frame_analyses)
-
-    # Count junk at start and end
-    start_frames = [fa for fa in frame_analyses if fa.timestamp_seconds <= 3]
-    end_frames = [fa for fa in frame_analyses if fa.timestamp_seconds >= duration - 3]
-
-    start_junk = sum(1 for fa in start_frames if fa.is_junk)
-    end_junk = sum(1 for fa in end_frames if fa.is_junk)
-
-    in_point = None
-    out_point = None
-
-    # Determine confidence based on agreement
-    has_opencv = any(fa.blur_score is not None for fa in frame_analyses)
-    has_vlm = any(fa.vlm_response is not None for fa in frame_analyses)
-
-    if has_opencv and has_vlm:
-        confidence = ConfidenceLevel.HIGH
-    elif has_vlm:
-        confidence = ConfidenceLevel.MEDIUM
-    else:
-        confidence = ConfidenceLevel.LOW
-
-    # If >50% junk, reject entire clip
-    if junk_ratio > 0.5:
-        return ClipDecision.REJECT, confidence, None, None
-
-    # If most start frames are junk, suggest trimming
-    if start_junk >= 3 or (len(start_frames) > 0 and start_junk / len(start_frames) > 0.5):
-        in_point = 3.0
-
-    # If most end frames are junk, suggest trimming
-    if end_junk >= 3 or (len(end_frames) > 0 and end_junk / len(end_frames) > 0.5):
-        out_point = max(0, duration - 3.0)
-
-    # If any trimming suggested, mark for review
-    if in_point is not None or out_point is not None:
-        return ClipDecision.REVIEW, confidence, in_point, out_point
-
-    # If any junk detected but not enough to reject/trim, mark for review
-    if junk_count > 0:
-        return ClipDecision.REVIEW, confidence, in_point, out_point
-
-    return ClipDecision.KEEP, confidence, None, None
 
 
 def analyze_clips_batch(
@@ -521,7 +364,7 @@ def analyze_clips_batch(
 
     Args:
         clips: List of (source_path, proxy_path) tuples.
-        use_vlm: Whether to use VLM for analysis.
+        use_vlm: Whether to use VLM for analysis (must be True).
         model_name: mlx-vlm model name.
 
     Returns:
