@@ -24,6 +24,7 @@ class CameraType(Enum):
     DJI_POCKET3 = "DJIPocket3"
     IPHONE_11PRO = "iPhone11Pro"
     INSTA360 = "Insta360"
+    INSTA360_ULTRA_GO = "Insta360UltraGo"
     UNKNOWN = "Unknown"
 
 
@@ -72,6 +73,15 @@ def detect_camera_type(volume_path: Path) -> CameraType:
     # Check DCIM folder for other cameras
     dcim_path = volume_path / "DCIM"
     if dcim_path.exists():
+        # Insta360 Ultra Go: VID_*.mp4 and LRV_*.lrv files in DCIM/Camera01
+        camera01_path = dcim_path / "Camera01"
+        if camera01_path.exists():
+            vid_files = list(camera01_path.glob("VID_*.mp4")) + list(camera01_path.glob("VID_*.MP4"))
+            lrv_files = list(camera01_path.glob("LRV_*.lrv")) + list(camera01_path.glob("LRV_*.LRV"))
+            if vid_files or lrv_files:
+                logger.info(f"Detected Insta360 Ultra Go camera at {volume_path}")
+                return CameraType.INSTA360_ULTRA_GO
+
         # Insta360: .insv, .insp files
         for ext in [".insv", ".INSV", ".insp", ".INSP"]:
             if list(dcim_path.rglob(f"*{ext}")):
@@ -146,6 +156,9 @@ def get_video_files(volume_path: Path, camera_type: CameraType) -> list[VideoFil
     elif camera_type == CameraType.INSTA360:
         search_path = volume_path / "DCIM"
         extensions = [".insv", ".INSV", ".insp", ".INSP"]
+    elif camera_type == CameraType.INSTA360_ULTRA_GO:
+        search_path = volume_path / "DCIM" / "Camera01"
+        extensions = [".mp4", ".MP4"]  # Only get VID_*.mp4 files, skip LRV files
     else:
         # Unknown camera - search entire volume
         extensions = [".MP4", ".mp4", ".MOV", ".mov", ".MTS", ".mts"]

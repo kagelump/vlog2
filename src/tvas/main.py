@@ -19,12 +19,11 @@ from tvas.proxy import ProxyConfig, ProxyType, generate_proxies_batch
 from tvas.review_ui import (
     ClipReviewItem,
     UserDecision,
-    check_toga_available,
     create_review_items_from_analysis,
     run_review_ui,
 )
 from tvas.timeline import TimelineConfig, create_timeline_from_analysis, export_analysis_json
-from tvas.watcher import VolumeWatcher, check_watchdog_available, is_camera_volume
+from tvas.watcher import VolumeWatcher, check_watchdog_available, find_camera_volumes, is_camera_volume
 
 # Configure logging
 logging.basicConfig(
@@ -39,7 +38,8 @@ class TVASApp:
 
     def __init__(
         self,
-        vlog_base_path: Path | None = None,
+        archival_path: Path | None = None,
+        proxy_path: Path | None = None,
         use_vlm: bool = True,
         vlm_model: str = DEFAULT_VLM_MODEL,
         auto_approve: bool = False,
@@ -47,12 +47,25 @@ class TVASApp:
         """Initialize the TVAS application.
 
         Args:
-            vlog_base_path: Base path for vlog storage (default: ~/Movies/Vlog).
+            archival_path: Path for archival storage (SSD). Auto-detects /Volumes/ACASIS if None.
+            proxy_path: Path for local proxy storage (default: ~/Movies/Vlog).
             use_vlm: Whether to use VLM for analysis.
             vlm_model: mlx-vlm model name for VLM.
             auto_approve: Auto-approve all AI decisions without UI.
         """
-        self.vlog_base_path = vlog_base_path or Path.home() / "Movies" / "Vlog"
+        # Auto-detect ACASIS volume for archival
+        if archival_path is None:
+            acasis_path = Path("/Volumes/ACASIS")
+            if acasis_path.exists():
+                self.archival_path = acasis_path
+                logger.info(f"Auto-detected archival storage: {acasis_path}")
+            else:
+                self.archival_path = None
+                logger.info("No archival storage found - will skip file copying")
+        else:
+            self.archival_path = archival_path
+        
+        self.proxy_path = proxy_path or Path.home() / "Movies" / "Vlog"
         self.use_vlm = use_vlm
         self.vlm_model = vlm_model
         self.auto_approve = auto_approve
@@ -95,34 +108,48 @@ class TVASApp:
         if project_name is None:
             project_name = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Stage 1: Ingest files
-        logger.info("Stage 1: Ingesting files...")
-        try:
-            session = ingest_volume(
-                volume_path,
-                self.vlog_base_path,
-                project_name,
-                progress_callback=lambda name, i, total: logger.info(
-                    f"Copying {i}/{total}: {name}"
-                ),
-            )
-            results["files_processed"] = len(session.files)
-            logger.info(f"Ingested {len(session.files)} files")
-        except Exception as e:
-            results["errors"].append(f"Ingestion failed: {e}")
-            logger.error(f"Ingestion failed: {e}")
-            return results
+        # Stage 1: Ingest files (optional - skip if no archival path)
+        source_files = []
+        if self.archival_path:
+            logger.info("Stage 1: Ingesting files to archival storage...")
+            try:
+                session = ingest_volume(
+                    volume_path,
+                    self.archival_path,
+                    project_name,
+                    progress_callback=lambda name, i, total: logger.info(
+                        f"Copying {i}/{total}: {name}"
+                    ),
+                )
+                results["files_processed"] = len(session.files)
+                logger.info(f"Ingested {len(session.files)} files")
+                source_files = [f.destination_path for f in session.files if f.destination_path]
+            except Exception as e:
+                results["errors"].append(f"Ingestion failed: {e}")
+                logger.error(f"Ingestion failed: {e}")
+                return results
 
-        if not session.files:
-            results["errors"].append("No files found to process")
-            return results
+            if not session.files:
+                results["errors"].append("No files found to process")
+                return results
+        else:
+            # No archival - work directly from SD card
+            logger.info("Stage 1: Skipping archival copy (no archival path)...")
+            from tvas.ingestion import get_video_files
+            video_files = get_video_files(volume_path, camera_type)
+            source_files = [f.source_path for f in video_files]
+            results["files_processed"] = len(source_files)
+            logger.info(f"Found {len(source_files)} files on SD card")
+            
+            if not source_files:
+                results["errors"].append("No files found to process")
+                return results
 
         # Stage 2: Generate AI proxies
         logger.info("Stage 2: Generating AI proxies...")
-        source_files = [f.destination_path for f in session.files if f.destination_path]
 
-        # Determine cache directory
-        cache_dir = self.vlog_base_path / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}" / ".cache"
+        # Determine cache directory (always on local proxy_path)
+        cache_dir = self.proxy_path / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}" / ".cache"
 
         try:
             proxy_results = generate_proxies_batch(
@@ -173,15 +200,11 @@ class TVASApp:
         reviewed_clips = None
         if not self.auto_approve:
             logger.info("Stage 4: Opening review UI...")
-            if check_toga_available():
-                try:
-                    review_items = create_review_items_from_analysis(analyses)
-                    reviewed_clips = run_review_ui(review_items)
-                except Exception as e:
-                    logger.warning(f"UI failed, using auto-approve: {e}")
-                    self.auto_approve = True
-            else:
-                logger.info("Toga not available - auto-approving AI decisions")
+            try:
+                review_items = create_review_items_from_analysis(analyses)
+                reviewed_clips = run_review_ui(review_items)
+            except Exception as e:
+                logger.warning(f"UI failed, using auto-approve: {e}")
                 self.auto_approve = True
 
         if self.auto_approve:
@@ -194,7 +217,7 @@ class TVASApp:
         # Stage 5: Generate Timeline
         logger.info("Stage 5: Generating timeline...")
         timeline_path = (
-            self.vlog_base_path
+            self.proxy_path
             / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}"
             / f"{project_name}_timeline.otio"
         )
@@ -292,9 +315,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  tvas                      Auto-detect camera SD card and ACASIS archival storage
   tvas --watch              Start watching for SD cards
   tvas --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
-  tvas --volume /Volumes/SONY_A7C --auto-approve
+  tvas --archival-path /Volumes/MySSD --proxy-path ~/Videos
         """,
     )
 
@@ -307,7 +331,7 @@ Examples:
     parser.add_argument(
         "--volume",
         type=Path,
-        help="Process a specific volume/SD card",
+        help="Process a specific volume/SD card (auto-detects if not specified)",
     )
 
     parser.add_argument(
@@ -317,10 +341,16 @@ Examples:
     )
 
     parser.add_argument(
-        "--base-path",
+        "--archival-path",
+        type=Path,
+        help="Path for archival storage (auto-detects /Volumes/ACASIS if not specified)",
+    )
+
+    parser.add_argument(
+        "--proxy-path",
         type=Path,
         default=Path.home() / "Movies" / "Vlog",
-        help="Base path for vlog storage (default: ~/Movies/Vlog)",
+        help="Path for local proxy/timeline storage (default: ~/Movies/Vlog)",
     )
 
     parser.add_argument(
@@ -355,7 +385,8 @@ Examples:
         logging.getLogger().setLevel(logging.DEBUG)
 
     app = TVASApp(
-        vlog_base_path=args.base_path,
+        archival_path=args.archival_path,
+        proxy_path=args.proxy_path,
         use_vlm=not args.no_vlm,
         vlm_model=args.model,
         auto_approve=args.auto_approve,
@@ -381,8 +412,32 @@ Examples:
                 logger.error(f"  - {error}")
             sys.exit(1)
     else:
-        parser.print_help()
-        sys.exit(0)
+        # Auto-detect camera volumes
+        logger.info("No volume specified - searching for camera SD cards...")
+        camera_volumes = find_camera_volumes()
+        
+        if not camera_volumes:
+            logger.error("No camera volumes found. Please insert an SD card or specify --volume")
+            parser.print_help()
+            sys.exit(1)
+        elif len(camera_volumes) == 1:
+            logger.info(f"Found camera volume: {camera_volumes[0]}")
+            results = app.process_volume(camera_volumes[0], args.project)
+            
+            if results["success"]:
+                logger.info("Processing complete!")
+                logger.info(f"Files processed: {results['files_processed']}")
+                logger.info(f"Clips analyzed: {results['clips_analyzed']}")
+                logger.info(f"Timeline: {results['timeline_path']}")
+            else:
+                logger.error("Processing failed:")
+                for error in results["errors"]:
+                    logger.error(f"  - {error}")
+                sys.exit(1)
+        else:
+            logger.error(f"Multiple camera volumes found: {[str(v) for v in camera_volumes]}")
+            logger.error("Please specify which volume to process with --volume")
+            sys.exit(1)
 
 
 if __name__ == "__main__":
