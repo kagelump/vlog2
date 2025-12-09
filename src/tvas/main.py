@@ -15,7 +15,7 @@ from typing import Any
 
 from tvas.analysis import ClipDecision, analyze_clips_batch, DEFAULT_VLM_MODEL
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
-from tvas.proxy import ProxyConfig, ProxyType, generate_proxies_batch
+from tvas.proxy import ProxyConfig, generate_proxies_batch
 from tvas.review_ui import (
     ClipReviewItem,
     UserDecision,
@@ -145,18 +145,17 @@ class TVASApp:
                 results["errors"].append("No files found to process")
                 return results
 
-        # Stage 2: Generate AI proxies
-        logger.info("Stage 2: Generating AI proxies...")
+        # Stage 2: Generate edit proxies
+        logger.info("Stage 2: Generating edit proxies...")
 
         # Determine cache directory (always on local proxy_path)
         cache_dir = self.proxy_path / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}" / ".cache"
 
-        # Stage 2a: Generate edit proxies (ProRes for smooth editing)
+        # Generate edit proxies (ProRes for smooth editing)
         try:
             edit_proxy_results = generate_proxies_batch(
                 source_files,
                 cache_dir,
-                ProxyType.EDIT_PROXY,
                 ProxyConfig(use_hardware_accel=True),
             )
             successful_edit_proxies = [r for r in edit_proxy_results if r.success]
@@ -166,35 +165,11 @@ class TVASApp:
             logger.error(f"Edit proxy generation failed: {e}")
             edit_proxy_results = []
 
-        # Stage 2b: Generate AI proxies (low-res for VLM analysis)
-        try:
-            proxy_results = generate_proxies_batch(
-                source_files,
-                cache_dir,
-                ProxyType.AI_PROXY,
-                ProxyConfig(use_hardware_accel=True),
-            )
-            successful_proxies = [r for r in proxy_results if r.success]
-            logger.info(f"Generated {len(successful_proxies)}/{len(proxy_results)} AI proxies")
-        except Exception as e:
-            results["errors"].append(f"AI proxy generation failed: {e}")
-            logger.error(f"AI proxy generation failed: {e}")
-            # Continue without proxies - will analyze originals
-            proxy_results = []
-
-        # Create clips list for analysis
-        clips_to_analyze = []
-        for source_file in source_files:
-            # Find corresponding proxy
-            proxy_path = None
-            for pr in proxy_results:
-                if pr.success and pr.source_path == source_file:
-                    proxy_path = pr.proxy_path
-                    break
-            clips_to_analyze.append((source_file, proxy_path))
-
-        # Stage 3: AI Analysis
+        # Stage 3: AI Analysis (uses original files, AI proxies generated on-the-fly)
         logger.info("Stage 3: Analyzing clips...")
+        
+        # Analysis uses original source files directly (no pre-generated AI proxies)
+        clips_to_analyze: list[tuple[Path, Path | None]] = [(source_file, None) for source_file in source_files]
         try:
             analyses = analyze_clips_batch(
                 clips_to_analyze,

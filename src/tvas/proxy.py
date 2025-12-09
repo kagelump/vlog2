@@ -1,7 +1,7 @@
 """Stage 2: Proxy Generation
 
 This module handles proxy video generation using FFmpeg with hardware acceleration.
-Generates AI proxies (low-res for VLM inference) and optional edit proxies (ProRes).
+Generates edit proxies (ProRes) for smooth editing in DaVinci Resolve.
 """
 
 import json
@@ -41,19 +41,15 @@ class ProxyType(Enum):
     """Types of proxy videos."""
 
     EDIT_PROXY = "edit_proxy"  # ProRes Proxy - for smooth editing
-    AI_PROXY = "ai_proxy"  # 640px wide, 12fps, 500kbps - for VLM analysis
 
 
 @dataclass
 class ProxyConfig:
     """Configuration for proxy generation."""
 
-    width: int = 640  # AI proxy width
-    framerate: int = 12  # AI proxy framerate
-    bitrate: str = "500k"  # AI proxy bitrate
     use_hardware_accel: bool = True  # Use videotoolbox on macOS
     batch_size: int = 5  # Files per batch
-    cooldown_seconds: int = 30 # Cooldown between batches
+    cooldown_seconds: int = 30  # Cooldown between batches
     max_temp_celsius: int = 95  # Maximum CPU temperature
 
 
@@ -99,58 +95,6 @@ def check_videotoolbox_available() -> bool:
         return False
 
 
-def build_ai_proxy_command(
-    source_path: Path,
-    output_path: Path,
-    config: ProxyConfig,
-) -> list[str]:
-    """Build FFmpeg command for AI proxy generation.
-
-    AI Proxy specs:
-    - Resolution: 640px wide (maintains aspect ratio)
-    - Framerate: 12fps
-    - Bitrate: 500kbps
-    - Audio: Stripped
-
-    Args:
-        source_path: Path to source video.
-        output_path: Path for output proxy.
-        config: Proxy configuration.
-
-    Returns:
-        List of command arguments for subprocess.
-    """
-    cmd = ["ffmpeg", "-hide_banner", "-y"]
-
-    # Input
-    cmd.extend(["-i", str(source_path)])
-
-    # Video filters: scale to width, reduce framerate
-    vf = f"scale={config.width}:-2,fps={config.framerate}"
-    cmd.extend(["-vf", vf])
-
-    # Encoder selection
-    if config.use_hardware_accel and check_videotoolbox_available():
-        # macOS hardware acceleration
-        cmd.extend(["-c:v", "h264_videotoolbox"])
-        cmd.extend(["-b:v", config.bitrate])
-    else:
-        # Software encoding fallback
-        cmd.extend(["-c:v", "libx264"])
-        cmd.extend(["-preset", "fast"])
-        cmd.extend(["-crf", "28"])
-        cmd.extend(["-b:v", config.bitrate])
-
-    # No audio for AI analysis
-    cmd.extend(["-an"])
-
-    # Output format
-    cmd.extend(["-movflags", "+faststart"])
-    cmd.append(str(output_path))
-
-    return cmd
-
-
 def build_edit_proxy_command(
     source_path: Path,
     output_path: Path,
@@ -189,15 +133,13 @@ def build_edit_proxy_command(
 def generate_proxy(
     source_path: Path,
     output_dir: Path,
-    proxy_type: ProxyType = ProxyType.AI_PROXY,
     config: ProxyConfig | None = None,
 ) -> ProxyResult:
-    """Generate a proxy video for a single file.
+    """Generate an edit proxy video for a single file.
 
     Args:
         source_path: Path to source video.
         output_dir: Directory for output proxy.
-        proxy_type: Type of proxy to generate.
         config: Proxy configuration (uses defaults if None).
 
     Returns:
@@ -207,8 +149,7 @@ def generate_proxy(
         config = ProxyConfig()
 
     # Determine output filename
-    suffix = "_ai_proxy.mp4" if proxy_type == ProxyType.AI_PROXY else "_edit_proxy.mov"
-    output_path = output_dir / (source_path.stem + suffix)
+    output_path = output_dir / (source_path.stem + "_edit_proxy.mov")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -223,11 +164,11 @@ def generate_proxy(
             tolerance = source_duration * 0.02  # 2% tolerance
             
             if duration_diff <= tolerance:
-                logger.info(f"Skipping {source_path.name} - proxy already exists with correct duration ({format_duration(proxy_duration)})")
+                logger.info(f"Skipping {source_path.name} - edit proxy already exists with correct duration ({format_duration(proxy_duration)})")
                 return ProxyResult(
                     source_path=source_path,
                     proxy_path=output_path,
-                    proxy_type=proxy_type,
+                    proxy_type=ProxyType.EDIT_PROXY,
                     success=True,
                     duration_seconds=0.0,  # No processing time since skipped
                 )
@@ -239,17 +180,14 @@ def generate_proxy(
             logger.warning(f"Proxy exists but duration check failed, regenerating...")
             output_path.unlink()
 
-    # Build appropriate command
-    if proxy_type == ProxyType.AI_PROXY:
-        cmd = build_ai_proxy_command(source_path, output_path, config)
-    else:
-        cmd = build_edit_proxy_command(source_path, output_path)
+    # Build edit proxy command
+    cmd = build_edit_proxy_command(source_path, output_path)
 
     # Get video duration for logging
     video_duration = get_video_duration(source_path)
     duration_str = f" ({format_duration(video_duration)})" if video_duration else ""
     
-    logger.info(f"Generating {proxy_type.value} for {source_path.name}{duration_str}")
+    logger.info(f"Generating edit proxy for {source_path.name}{duration_str}")
     logger.debug(f"FFmpeg command: {' '.join(cmd)}")
 
     start_time = time.time()
@@ -269,7 +207,7 @@ def generate_proxy(
             return ProxyResult(
                 source_path=source_path,
                 proxy_path=output_path,
-                proxy_type=proxy_type,
+                proxy_type=ProxyType.EDIT_PROXY,
                 success=True,
                 duration_seconds=duration,
             )
@@ -279,7 +217,7 @@ def generate_proxy(
             return ProxyResult(
                 source_path=source_path,
                 proxy_path=None,
-                proxy_type=proxy_type,
+                proxy_type=ProxyType.EDIT_PROXY,
                 success=False,
                 duration_seconds=duration,
                 error_message=error_msg,
@@ -291,7 +229,7 @@ def generate_proxy(
         return ProxyResult(
             source_path=source_path,
             proxy_path=None,
-            proxy_type=proxy_type,
+            proxy_type=ProxyType.EDIT_PROXY,
             success=False,
             duration_seconds=duration,
             error_message="Process timed out after 600 seconds",
@@ -302,7 +240,7 @@ def generate_proxy(
         return ProxyResult(
             source_path=source_path,
             proxy_path=None,
-            proxy_type=proxy_type,
+            proxy_type=ProxyType.EDIT_PROXY,
             success=False,
             duration_seconds=duration,
             error_message=str(e),
@@ -312,17 +250,15 @@ def generate_proxy(
 def generate_proxies_batch(
     source_files: list[Path],
     output_dir: Path,
-    proxy_type: ProxyType = ProxyType.AI_PROXY,
     config: ProxyConfig | None = None,
 ) -> list[ProxyResult]:
-    """Generate proxy videos for a batch of files with thermal management.
+    """Generate edit proxy videos for a batch of files with thermal management.
 
     Processes files in batches with cooldown periods to manage thermal load.
 
     Args:
         source_files: List of source video paths.
         output_dir: Directory for output proxies.
-        proxy_type: Type of proxy to generate.
         config: Proxy configuration.
 
     Returns:
@@ -337,7 +273,7 @@ def generate_proxies_batch(
 
     for i, source_path in enumerate(source_files):
         # Generate proxy
-        result = generate_proxy(source_path, output_dir, proxy_type, config)
+        result = generate_proxy(source_path, output_dir, config)
         results.append(result)
 
         batch_count += 1
