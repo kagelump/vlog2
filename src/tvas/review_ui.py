@@ -276,20 +276,15 @@ def create_review_items_from_analysis(
     Returns:
         List of ClipReviewItem objects.
     """
-    from tvas.analysis import ClipAnalysis, ClipDecision
+    from tvas.analysis import ClipAnalysis
 
     items = []
     for analysis in analyses:
         if not isinstance(analysis, ClipAnalysis):
             continue
 
-        # Map decision to string
-        if analysis.decision == ClipDecision.KEEP:
-            ai_decision = "keep"
-        elif analysis.decision == ClipDecision.REJECT:
-            ai_decision = "reject"
-        else:
-            ai_decision = "review"
+        # All clips default to "review" status (user decides)
+        ai_decision = "review"
 
         item = ClipReviewItem(
             source_path=analysis.source_path,
@@ -298,7 +293,7 @@ def create_review_items_from_analysis(
             duration_seconds=analysis.duration_seconds,
             ai_decision=ai_decision,
             confidence=analysis.confidence.value,
-            junk_reasons=[r.value for r in analysis.junk_reasons],
+            junk_reasons=[],  # No longer tracking junk reasons
             suggested_in_point=analysis.suggested_in_point,
             suggested_out_point=analysis.suggested_out_point,
         )

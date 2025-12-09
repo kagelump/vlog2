@@ -1,6 +1,6 @@
-"""Stage 3: AI Analysis (Junk Detection)
+"""Stage 3: AI Analysis (Trim Detection)
 
-This module handles AI-powered junk detection using Qwen3 VL (8B) via mlx-vlm,
+This module handles AI-powered trim detection using Qwen3 VL (8B) via mlx-vlm,
 using native video processing for start/end point detection.
 """
 
@@ -31,32 +31,12 @@ VIDEO_SEGMENT_DURATION = 5.0  # Analyze first/last 5 seconds
 _model_cache: dict[str, tuple] = {}
 _model_cache_lock = threading.Lock()
 
-
-class JunkReason(Enum):
-    """Reasons a clip may be flagged as junk."""
-
-    BLUR = "blur"
-    DARKNESS = "darkness"
-    LENS_CAP = "lens_cap"
-    GROUND = "pointing_at_ground"
-    ACCIDENTAL = "accidental_trigger"
-    MULTIPLE = "multiple_issues"
-
-
 class ConfidenceLevel(Enum):
-    """Confidence level of junk detection."""
+    """Confidence level of trim detection."""
 
     HIGH = "high"  # VLM with clear reasoning
     MEDIUM = "medium"  # VLM with uncertain reasoning
     LOW = "low"  # VLM failed or unclear
-
-
-class ClipDecision(Enum):
-    """Decision for a clip."""
-
-    KEEP = "keep"
-    REJECT = "reject"
-    REVIEW = "review"  # Uncertain, needs user review
 
 
 @dataclass
@@ -66,9 +46,8 @@ class ClipAnalysis:
     source_path: Path
     proxy_path: Path | None
     duration_seconds: float
-    decision: ClipDecision
     confidence: ConfidenceLevel
-    junk_reasons: list[JunkReason]
+    clip_name: str | None = None
     suggested_in_point: float | None = None
     suggested_out_point: float | None = None
     vlm_response: str | None = None
@@ -119,7 +98,7 @@ def analyze_video_segment(
     fps: float = VIDEO_FPS,
     max_pixels: int = 224 * 224,
 ) -> dict:
-    """Analyze a video segment using VLM for junk detection and trim suggestions.
+    """Analyze a video segment using VLM for trim suggestions.
 
     Args:
         video_path: Path to the video file (can be proxy or original).
@@ -140,34 +119,32 @@ def analyze_video_segment(
     # Determine analysis strategy
     if duration <= 15:
         # Short video: analyze entire clip
-        prompt = f"""Analyze this {duration:.1f}s video clip for quality issues.
-Look for: blur/motion blur, camera pointing at ground, lens cap, extremely dark frames, accidental triggers.
+        prompt = f"""Analyze this {duration:.1f}s video clip and provide:
 
-Based on your analysis, provide:
-1. Whether any part should be trimmed (is_junk: true/false)
-2. Specific issues found (issues: list)
-3. Recommended start time in seconds (trim_start: number or null if no trim needed at start)
-4. Recommended end time in seconds (trim_end: number or null if no trim needed at end)
+1. A short descriptive name for the clip (2-4 words, snake_case, describing the main action/subject)
+   Examples: "airport_lobby_walk", "iceberg_passing", "sunset_timelapse", "coffee_shop_entrance"
+2. Recommended start time in seconds (trim_start: number or null if no trim needed)
+3. Recommended end time in seconds (trim_end: number or null if no trim needed)  
+4. Brief explanation (reason: string)
 
 Respond with ONLY valid JSON:
-{{"is_junk": true/false, "reason": "brief explanation", "issues": ["list"], "trim_start": null or number, "trim_end": null or number}}
+{{"clip_name": "descriptive_name", "trim_start": null or number, "trim_end": null or number, "reason": "brief explanation"}}
 
-Be conservative - only suggest trimming if there are clear quality issues."""
+Be conservative - only suggest trimming if there are clear quality issues at the beginning or end."""
     else:
         # Long video: focus on first/last 5 seconds
-        prompt = f"""Analyze the beginning and end of this {duration:.1f}s video clip.
-Look for quality issues in the FIRST and LAST few seconds: blur, camera pointing at ground, lens cap, dark frames, accidental triggers.
+        prompt = f"""Analyze this {duration:.1f}s video clip and provide:
 
-Based on your analysis, provide:
-1. Whether the start needs trimming (check first ~5 seconds)
-2. Whether the end needs trimming (check last ~5 seconds)
-3. Recommended start time in seconds if start has issues (trim_start: number or null)
-4. Recommended end time in seconds if end has issues (trim_end: number or null)
+1. A short descriptive name for the clip (2-4 words, snake_case, describing the main action/subject)
+   Examples: "mountain_hike_trail", "street_market_vendor", "drone_ocean_shot"
+2. Recommended start time in seconds if start needs trimming (trim_start: number or null)
+3. Recommended end time in seconds if end needs trimming (trim_end: number or null)
+4. Brief explanation (reason: string)
 
 Respond with ONLY valid JSON:
-{{"is_junk": true/false, "reason": "brief explanation", "issues": ["list"], "trim_start": null or number, "trim_end": null or number}}
+{{"clip_name": "descriptive_name", "trim_start": null or number, "trim_end": null or number, "reason": "brief explanation"}}
 
-Example: If first 3 seconds are junk, set trim_start to 3.0. If last 4 seconds are junk and video is 60s, set trim_end to 56.0."""
+Example: If first 3 seconds should be trimmed, set trim_start to 3.0. If last 4 seconds should be trimmed and video is 60s, set trim_end to 56.0."""
 
     try:
         # Prepare video input for mlx-vlm
@@ -239,9 +216,8 @@ Example: If first 3 seconds are junk, set trim_start to 3.0. If last 4 seconds a
                 json_str = response_text[start:end]
                 data = json.loads(json_str)
                 return {
-                    "is_junk": data.get("is_junk", False),
+                    "clip_name": data.get("clip_name"),
                     "reason": data.get("reason", ""),
-                    "issues": data.get("issues", []),
                     "trim_start": data.get("trim_start"),
                     "trim_end": data.get("trim_end"),
                     "raw_response": response_text,
@@ -249,15 +225,10 @@ Example: If first 3 seconds are junk, set trim_start to 3.0. If last 4 seconds a
         except json.JSONDecodeError:
             logger.warning(f"Failed to parse JSON from VLM response: {response_text[:200]}")
 
-        # Fallback: simple keyword detection
-        is_junk = any(
-            word in response_text.lower()
-            for word in ["junk", "blur", "dark", "ground", "accidental", "trim"]
-        )
+        # Fallback: no trim, no name
         return {
-            "is_junk": is_junk,
+            "clip_name": None,
             "reason": response_text[:200],
-            "issues": [],
             "trim_start": None,
             "trim_end": None,
             "raw_response": response_text,
@@ -274,7 +245,7 @@ def analyze_clip(
     use_vlm: bool = True,
     model_name: str = DEFAULT_VLM_MODEL,
 ) -> ClipAnalysis:
-    """Perform complete analysis of a video clip using VLM.
+    """Perform complete analysis of a video clip using VLM for trim detection.
 
     Args:
         source_path: Path to the original video file.
@@ -295,59 +266,25 @@ def analyze_clip(
     # Analyze video with VLM
     vlm_result = analyze_video_segment(video_to_analyze, model_name)
 
-    # Parse junk reasons from issues
-    junk_reasons: list[JunkReason] = []
-    for issue in vlm_result.get("issues", []):
-        issue_lower = issue.lower()
-        if "blur" in issue_lower:
-            junk_reasons.append(JunkReason.BLUR)
-        elif "dark" in issue_lower:
-            junk_reasons.append(JunkReason.DARKNESS)
-        elif "ground" in issue_lower:
-            junk_reasons.append(JunkReason.GROUND)
-        elif "lens" in issue_lower or "cap" in issue_lower:
-            junk_reasons.append(JunkReason.LENS_CAP)
-        elif "accidental" in issue_lower:
-            junk_reasons.append(JunkReason.ACCIDENTAL)
-
-    # If multiple issues, add that reason
-    if len(junk_reasons) > 1:
-        junk_reasons.append(JunkReason.MULTIPLE)
-
+    # Extract clip name from VLM suggestions
+    clip_name = vlm_result.get("clip_name")
+    
     # Determine trim points from VLM suggestions
     trim_start = vlm_result.get("trim_start")
     trim_end = vlm_result.get("trim_end")
 
-    # Determine decision based on VLM output
-    is_junk = vlm_result.get("is_junk", False)
-    
-    if is_junk and (trim_start is None and trim_end is None):
-        # Entire clip flagged as junk
-        decision = ClipDecision.REJECT
+    # Determine confidence based on whether VLM provided suggestions
+    if trim_start is not None or trim_end is not None:
         confidence = ConfidenceLevel.HIGH
-    elif trim_start is not None or trim_end is not None:
-        # Partial trim suggested
-        decision = ClipDecision.REVIEW
-        confidence = ConfidenceLevel.HIGH if junk_reasons else ConfidenceLevel.MEDIUM
-    elif is_junk:
-        # Marked as junk but no specific trim points
-        decision = ClipDecision.REVIEW
-        confidence = ConfidenceLevel.MEDIUM
     else:
-        # Clean clip
-        decision = ClipDecision.KEEP
-        confidence = ConfidenceLevel.HIGH
-
-    # Deduplicate reasons
-    unique_reasons = list(set(junk_reasons))
+        confidence = ConfidenceLevel.MEDIUM
 
     return ClipAnalysis(
         source_path=source_path,
         proxy_path=proxy_path,
         duration_seconds=duration,
-        decision=decision,
         confidence=confidence,
-        junk_reasons=unique_reasons,
+        clip_name=clip_name,
         suggested_in_point=trim_start,
         suggested_out_point=trim_end,
         vlm_response=vlm_result.get("raw_response"),
@@ -378,10 +315,7 @@ def analyze_clips_batch(
         results.append(result)
 
     # Summary logging
-    kept = sum(1 for r in results if r.decision == ClipDecision.KEEP)
-    rejected = sum(1 for r in results if r.decision == ClipDecision.REJECT)
-    review = sum(1 for r in results if r.decision == ClipDecision.REVIEW)
-
-    logger.info(f"Analysis complete: {kept} keep, {rejected} reject, {review} review")
+    with_trim = sum(1 for r in results if r.suggested_in_point or r.suggested_out_point)
+    logger.info(f"Analysis complete: {len(results)} clips analyzed, {with_trim} with trim suggestions")
 
     return results

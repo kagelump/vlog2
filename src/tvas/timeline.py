@@ -10,16 +10,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import opentimelineio as otio
+
 logger = logging.getLogger(__name__)
-
-# OpenTimelineIO is optional
-try:
-    import opentimelineio as otio
-
-    OTIO_AVAILABLE = True
-except ImportError:
-    OTIO_AVAILABLE = False
-    otio = None
 
 
 @dataclass
@@ -48,15 +41,6 @@ class TimelineConfig:
     add_markers: bool = True  # Add color markers for AI decisions
 
 
-def check_otio_available() -> bool:
-    """Check if OpenTimelineIO is available.
-
-    Returns:
-        True if OTIO is available.
-    """
-    return OTIO_AVAILABLE
-
-
 def create_timeline(
     clips: list[TimelineClip],
     output_path: Path,
@@ -72,10 +56,6 @@ def create_timeline(
     Returns:
         Path to the created timeline, or None if failed.
     """
-    if not OTIO_AVAILABLE:
-        logger.error("OpenTimelineIO not available - cannot create timeline")
-        return None
-
     if config is None:
         config = TimelineConfig()
 
@@ -187,7 +167,7 @@ def create_timeline_from_analysis(
     Returns:
         Path to the created timeline.
     """
-    from tvas.analysis import ClipAnalysis, ClipDecision
+    from tvas.analysis import ClipAnalysis
     from tvas.review_ui import ClipReviewItem, UserDecision
 
     timeline_clips = []
@@ -206,7 +186,7 @@ def create_timeline_from_analysis(
         # Check for user override
         user_review = user_decisions.get(str(analysis.source_path))
 
-        # Determine final decision
+        # Determine final decision based on user review
         is_rejected = False
         is_uncertain = False
 
@@ -216,27 +196,22 @@ def create_timeline_from_analysis(
             elif user_review.user_decision == UserDecision.KEEP:
                 is_rejected = False
                 is_uncertain = False
-            elif user_review.user_decision == UserDecision.APPROVE:
-                # Use AI decision
-                is_rejected = analysis.decision == ClipDecision.REJECT
-                is_uncertain = analysis.decision == ClipDecision.REVIEW
             else:
-                # Undecided - use AI decision
-                is_rejected = analysis.decision == ClipDecision.REJECT
-                is_uncertain = analysis.decision == ClipDecision.REVIEW
+                # Undecided - mark as uncertain
+                is_uncertain = True
         else:
-            # No user review - use AI decision
-            is_rejected = analysis.decision == ClipDecision.REJECT
-            is_uncertain = analysis.decision == ClipDecision.REVIEW
+            # No user review - mark as uncertain for review
+            is_uncertain = True
 
-        # Build AI notes
-        ai_notes = ""
-        if analysis.junk_reasons:
-            ai_notes = f"Issues: {', '.join(r.value for r in analysis.junk_reasons)}"
+        # Build AI notes from VLM summary
+        ai_notes = analysis.vlm_summary or ""
+
+        # Use AI-generated clip name if available, otherwise use filename
+        clip_name = analysis.clip_name or analysis.source_path.stem
 
         timeline_clip = TimelineClip(
             source_path=analysis.source_path,
-            name=analysis.source_path.stem,
+            name=clip_name,
             duration_seconds=analysis.duration_seconds,
             in_point_seconds=analysis.suggested_in_point or 0.0,
             out_point_seconds=analysis.suggested_out_point,
@@ -280,22 +255,12 @@ def export_analysis_json(
             "source_path": str(analysis.source_path),
             "proxy_path": str(analysis.proxy_path) if analysis.proxy_path else None,
             "duration_seconds": analysis.duration_seconds,
-            "decision": analysis.decision.value,
             "confidence": analysis.confidence.value,
-            "junk_reasons": [r.value for r in analysis.junk_reasons],
+            "clip_name": analysis.clip_name,
             "suggested_in_point": analysis.suggested_in_point,
             "suggested_out_point": analysis.suggested_out_point,
-            "mean_audio_db": analysis.mean_audio_db,
-            "frame_analyses": [
-                {
-                    "timestamp": fa.timestamp_seconds,
-                    "is_junk": fa.is_junk,
-                    "blur_score": fa.blur_score,
-                    "brightness_score": fa.brightness_score,
-                    "junk_reasons": [r.value for r in fa.junk_reasons],
-                }
-                for fa in analysis.frame_analyses
-            ],
+            "vlm_response": analysis.vlm_response,
+            "vlm_summary": analysis.vlm_summary,
         }
         data["clips"].append(clip_data)
 
@@ -317,9 +282,6 @@ def get_timeline_summary(timeline_path: Path) -> dict | None:
     Returns:
         Dictionary with timeline summary, or None if failed.
     """
-    if not OTIO_AVAILABLE:
-        return None
-
     try:
         timeline = otio.adapters.read_from_file(str(timeline_path))
 
