@@ -187,26 +187,8 @@ class TVASApp:
             logger.error(f"Analysis failed: {e}")
             return results
 
-        # Stage 4: User Review
-        reviewed_clips = None
-        if not self.auto_approve:
-            logger.info("Stage 4: Opening review UI...")
-            try:
-                review_items = create_review_items_from_analysis(analyses)
-                reviewed_clips = run_review_ui(review_items)
-            except Exception as e:
-                logger.warning(f"UI failed, using auto-approve: {e}")
-                self.auto_approve = True
-
-        if self.auto_approve:
-            # Create review items with auto-approve
-            review_items = create_review_items_from_analysis(analyses)
-            for item in review_items:
-                item.user_decision = UserDecision.APPROVE
-            reviewed_clips = review_items
-
-        # Stage 5: Generate Timeline
-        logger.info("Stage 5: Generating timeline...")
+        # Stage 4: Generate Timeline (user review happens in DaVinci Resolve)
+        logger.info("Stage 4: Generating timeline...")
         timeline_path = (
             self.proxy_path
             / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}"
@@ -216,7 +198,6 @@ class TVASApp:
         try:
             result_path = create_timeline_from_analysis(
                 analyses,
-                reviewed_clips,
                 timeline_path,
                 TimelineConfig(name=project_name),
             )

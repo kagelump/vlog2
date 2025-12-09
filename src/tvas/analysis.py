@@ -125,10 +125,9 @@ def analyze_video_segment(
    Examples: "airport_lobby_walk", "iceberg_passing", "sunset_timelapse", "coffee_shop_entrance"
 2. Recommended start time in seconds (trim_start: number or null if no trim needed)
 3. Recommended end time in seconds (trim_end: number or null if no trim needed)  
-4. Brief explanation (reason: string)
 
 Respond with ONLY valid JSON:
-{{"clip_name": "descriptive_name", "trim_start": null or number, "trim_end": null or number, "reason": "brief explanation"}}
+{{"clip_name": "descriptive_name", "trim_start": null or number, "trim_end": null or number}}
 
 Be conservative - only suggest trimming if there are clear quality issues at the beginning or end."""
     else:
@@ -139,10 +138,9 @@ Be conservative - only suggest trimming if there are clear quality issues at the
    Examples: "mountain_hike_trail", "street_market_vendor", "drone_ocean_shot"
 2. Recommended start time in seconds if start needs trimming (trim_start: number or null)
 3. Recommended end time in seconds if end needs trimming (trim_end: number or null)
-4. Brief explanation (reason: string)
 
 Respond with ONLY valid JSON:
-{{"clip_name": "descriptive_name", "trim_start": null or number, "trim_end": null or number, "reason": "brief explanation"}}
+{{"clip_name": "descriptive_name", "trim_start": null or number, "trim_end": null or number}}
 
 Example: If first 3 seconds should be trimmed, set trim_start to 3.0. If last 4 seconds should be trimmed and video is 60s, set trim_end to 56.0."""
 
