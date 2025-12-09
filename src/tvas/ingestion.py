@@ -224,15 +224,11 @@ def create_destination_structure(
     Returns:
         Path to the camera-specific destination directory.
     """
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    project_folder = f"{date_str}_{project_name}"
     camera_folder = camera_type.value
 
-    dest_path = base_path / project_folder / camera_folder
-    cache_path = base_path / project_folder / ".cache"
+    dest_path = base_path / project_name/ camera_folder
 
     dest_path.mkdir(parents=True, exist_ok=True)
-    cache_path.mkdir(parents=True, exist_ok=True)
 
     # Clean up any leftover temporary files from previous interrupted copies
     cleanup_temp_files(dest_path)
