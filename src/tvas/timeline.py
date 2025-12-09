@@ -1,6 +1,6 @@
-"""Stage 5: Timeline Generation
+"""Stage 4: Timeline Generation
 
-This module generates OpenTimelineIO timelines from analyzed and reviewed clips
+This module generates OpenTimelineIO timelines from analyzed clips
 for import into DaVinci Resolve.
 """
 

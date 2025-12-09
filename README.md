@@ -80,19 +80,17 @@ tvas --volume /Volumes/DJI_POCKET3 --no-vlm
 ## Pipeline Stages
 
 1. **Ingestion**: Copy files from SD card with verification
-2. **Proxy Generation**: Create low-res AI proxies using FFmpeg
-3. **AI Analysis**: Detect junk clips using Qwen3 VL (8B) + OpenCV
-4. **User Review**: Review and override AI decisions in Toga UI
-5. **Timeline Generation**: Export OpenTimelineIO for DaVinci Resolve
+2. **Proxy Generation**: Create ProRes edit proxies using FFmpeg
+3. **AI Analysis**: Generate clip names and suggest trim points using Qwen3 VL (8B)
+4. **Timeline Generation**: Export OpenTimelineIO for DaVinci Resolve (review/editing done in Resolve)
 
 ## Configuration
 
 | Option | Description | Default |
-|--------|-------------|---------|
-| `--base-path` | Base path for vlog storage | `~/Movies/Vlog` |
+|--------|-------------|---------|  
+| `--archival-path` | Path for archival storage (auto-detects ACASIS) | Auto-detect |
+| `--proxy-path` | Path for edit proxies and cache | `~/Movies/Vlog` |
 | `--model` | mlx-vlm model for VLM | `mlx-community/Qwen3-VL-8B-Instruct-8bit` |
-| `--auto-approve` | Skip UI, approve all AI decisions | `False` |
-| `--no-vlm` | Disable VLM, use OpenCV only | `False` |
 
 ## Development
 

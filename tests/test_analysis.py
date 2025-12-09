@@ -6,10 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tvas.analysis import (
-    ClipDecision,
     ConfidenceLevel,
     DEFAULT_VLM_MODEL,
-    JunkReason,
     check_model_available,
 )
 
@@ -29,29 +27,6 @@ class TestDefaultModel:
     def test_default_model_is_qwen3_vl_8b(self):
         """Test that the default model is Qwen3 VL 8B."""
         assert DEFAULT_VLM_MODEL == "mlx-community/Qwen3-VL-8B-Instruct-8bit"
-
-
-class TestJunkReason:
-    """Tests for JunkReason enum."""
-
-    def test_junk_reason_values(self):
-        """Test that JunkReason enum has expected values."""
-        assert JunkReason.BLUR.value == "blur"
-        assert JunkReason.DARKNESS.value == "darkness"
-        assert JunkReason.LENS_CAP.value == "lens_cap"
-        assert JunkReason.GROUND.value == "pointing_at_ground"
-        assert JunkReason.ACCIDENTAL.value == "accidental_trigger"
-        assert JunkReason.MULTIPLE.value == "multiple_issues"
-
-
-class TestClipDecision:
-    """Tests for ClipDecision enum."""
-
-    def test_clip_decision_values(self):
-        """Test that ClipDecision enum has expected values."""
-        assert ClipDecision.KEEP.value == "keep"
-        assert ClipDecision.REJECT.value == "reject"
-        assert ClipDecision.REVIEW.value == "review"
 
 
 class TestConfidenceLevel:
