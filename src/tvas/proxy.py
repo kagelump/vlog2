@@ -10,8 +10,8 @@ import os
 import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -37,29 +37,12 @@ def format_duration(seconds: float) -> str:
         return f"{minutes}:{secs:02d}"
 
 
-class ProxyType(Enum):
-    """Types of proxy videos."""
-
-    EDIT_PROXY = "edit_proxy"  # ProRes Proxy - for smooth editing
-
-
-@dataclass
-class ProxyConfig:
-    """Configuration for proxy generation."""
-
-    use_hardware_accel: bool = True  # Use videotoolbox on macOS
-    batch_size: int = 5  # Files per batch
-    cooldown_seconds: int = 30  # Cooldown between batches
-    max_temp_celsius: int = 95  # Maximum CPU temperature
-
-
 @dataclass
 class ProxyResult:
     """Result of proxy generation for a single file."""
 
     source_path: Path
     proxy_path: Path | None
-    proxy_type: ProxyType
     success: bool
     duration_seconds: float
     error_message: str | None = None
@@ -116,15 +99,17 @@ def build_edit_proxy_command(
     cmd = [
         "ffmpeg",
         "-hide_banner",
+        "-benchmark",
         "-y",
-        "-i",
-        str(source_path),
-        "-c:v",
-        "prores_ks",
-        "-profile:v",
-        "0",  # ProRes 422 Proxy
-        "-c:a",
-        "pcm_s16le",  # Preserve audio
+        "-hwaccel", "videotoolbox",
+        # "-hwaccel_output_format", "videotoolbox_vld",  # Keep frames in GPU memory
+        "-i", str(source_path),
+        "-vf", "scale=-2:1080: flags=fast_bilinear",      # Resize to 1080p height, maintain aspect ratio
+        "-c:v", "h264_videotoolbox",
+        "-profile:v", "high",
+        "-b:v", "6000k",
+        "-allow_sw", "1",
+        "-c:a", "copy",
         str(output_path),
     ]
     return cmd
@@ -133,23 +118,19 @@ def build_edit_proxy_command(
 def generate_proxy(
     source_path: Path,
     output_dir: Path,
-    config: ProxyConfig | None = None,
 ) -> ProxyResult:
     """Generate an edit proxy video for a single file.
 
     Args:
         source_path: Path to source video.
         output_dir: Directory for output proxy.
-        config: Proxy configuration (uses defaults if None).
 
     Returns:
         ProxyResult with details of the operation.
     """
-    if config is None:
-        config = ProxyConfig()
 
     # Determine output filename
-    output_path = output_dir / (source_path.stem + "_edit_proxy.mov")
+    output_path = output_dir / (source_path.stem + ".mp4")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -168,7 +149,6 @@ def generate_proxy(
                 return ProxyResult(
                     source_path=source_path,
                     proxy_path=output_path,
-                    proxy_type=ProxyType.EDIT_PROXY,
                     success=True,
                     duration_seconds=0.0,  # No processing time since skipped
                 )
@@ -204,10 +184,11 @@ def generate_proxy(
 
         if result.returncode == 0 and output_path.exists():
             logger.info(f"Successfully generated proxy in {duration:.1f}s: {output_path.name}")
+            logger.info(f"FFmpeg output: {result.stdout}")
+            logger.info(f"FFmpeg output: {result.stderr}")
             return ProxyResult(
                 source_path=source_path,
                 proxy_path=output_path,
-                proxy_type=ProxyType.EDIT_PROXY,
                 success=True,
                 duration_seconds=duration,
             )
@@ -217,7 +198,6 @@ def generate_proxy(
             return ProxyResult(
                 source_path=source_path,
                 proxy_path=None,
-                proxy_type=ProxyType.EDIT_PROXY,
                 success=False,
                 duration_seconds=duration,
                 error_message=error_msg,
@@ -229,7 +209,6 @@ def generate_proxy(
         return ProxyResult(
             source_path=source_path,
             proxy_path=None,
-            proxy_type=ProxyType.EDIT_PROXY,
             success=False,
             duration_seconds=duration,
             error_message="Process timed out after 600 seconds",
@@ -240,7 +219,6 @@ def generate_proxy(
         return ProxyResult(
             source_path=source_path,
             proxy_path=None,
-            proxy_type=ProxyType.EDIT_PROXY,
             success=False,
             duration_seconds=duration,
             error_message=str(e),
@@ -250,55 +228,42 @@ def generate_proxy(
 def generate_proxies_batch(
     source_files: list[Path],
     output_dir: Path,
-    config: ProxyConfig | None = None,
+    max_workers: int = 4,
 ) -> list[ProxyResult]:
-    """Generate edit proxy videos for a batch of files with thermal management.
-
-    Processes files in batches with cooldown periods to manage thermal load.
+    """Generate edit proxy videos for a batch of files with parallel processing.
 
     Args:
         source_files: List of source video paths.
         output_dir: Directory for output proxies.
-        config: Proxy configuration.
+        max_workers: Maximum number of concurrent encoding jobs (default: 3).
 
     Returns:
         List of ProxyResult for each file.
     """
-    if config is None:
-        config = ProxyConfig()
-
     results: list[ProxyResult] = []
-    batch_count = 0
-    processed_count = 0  # Track actually processed (not skipped) videos
-
-    for i, source_path in enumerate(source_files):
-        # Generate proxy
-        result = generate_proxy(source_path, output_dir, config)
-        results.append(result)
-
-        batch_count += 1
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all jobs
+        future_to_source = {
+            executor.submit(generate_proxy, source_path, output_dir): source_path
+            for source_path in source_files
+        }
         
-        # Only count as processed if ffmpeg actually ran (duration > 0)
-        if result.success and result.duration_seconds > 0:
-            processed_count += 1
-
-        # Thermal management: cooldown after each batch, scaled by actual work done
-        # No cooldown needed if using hardware acceleration (GPU doesn't overheat like CPU)
-        if batch_count >= config.batch_size and i < len(source_files) - 1:
-            # Skip cooldown if hardware acceleration is enabled
-            if config.use_hardware_accel and check_videotoolbox_available():
-                logger.info(f"Batch complete ({processed_count} processed, {batch_count - processed_count} skipped). No cooldown needed (hardware acceleration).")
-            # Scale cooldown: 0 processed = no cooldown, full batch = full cooldown
-            elif processed_count > 0:
-                cooldown_ratio = processed_count / config.batch_size
-                scaled_cooldown = int(config.cooldown_seconds * cooldown_ratio)
-                logger.info(f"Batch complete ({processed_count} processed, {batch_count - processed_count} skipped). Cooling down for {scaled_cooldown}s...")
-                time.sleep(scaled_cooldown)
-            else:
-                logger.info(f"Batch complete (all {batch_count} skipped). No cooldown needed.")
-            
-            batch_count = 0
-            processed_count = 0
+        # Collect results as they complete
+        for future in as_completed(future_to_source):
+            source_path = future_to_source[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Unexpected error processing {source_path.name}: {e}")
+                results.append(ProxyResult(
+                    source_path=source_path,
+                    proxy_path=None,
+                    success=False,
+                    duration_seconds=0.0,
+                    error_message=str(e),
+                ))
 
     successful = sum(1 for r in results if r.success)
     logger.info(f"Proxy generation complete: {successful}/{len(results)} successful")

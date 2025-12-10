@@ -15,7 +15,7 @@ from typing import Any
 
 from tvas.analysis import analyze_clips_batch, DEFAULT_VLM_MODEL
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
-from tvas.proxy import ProxyConfig, generate_proxies_batch
+from tvas.proxy import generate_proxies_batch
 from tvas.timeline import TimelineConfig, create_timeline_from_analysis, export_analysis_json
 from tvas.watcher import VolumeWatcher, check_watchdog_available, find_camera_volumes, is_camera_volume
 
@@ -92,16 +92,14 @@ class TVASApp:
             results["errors"].append("No files to process")
             return results
 
-        # Determine cache directory (always on local proxy_path)
-        cache_dir = self.proxy_path / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}" / ".cache"
+        proxy_dir = self.proxy_path / project_name / "proxy"
 
         # Stage 2: Generate edit proxies
         logger.info("Stage 2: Generating edit proxies...")
         try:
             edit_proxy_results = generate_proxies_batch(
                 source_files,
-                cache_dir,
-                ProxyConfig(use_hardware_accel=True),
+                proxy_dir,
             )
             successful_edit_proxies = [r for r in edit_proxy_results if r.success]
             logger.info(f"Generated {len(successful_edit_proxies)}/{len(edit_proxy_results)} edit proxies")
