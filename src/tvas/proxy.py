@@ -99,10 +99,8 @@ def build_edit_proxy_command(
     cmd = [
         "ffmpeg",
         "-hide_banner",
-        "-benchmark",
         "-y",
         "-hwaccel", "videotoolbox",
-        # "-hwaccel_output_format", "videotoolbox_vld",  # Keep frames in GPU memory
         "-i", str(source_path),
         "-vf", "scale=-2:1080: flags=fast_bilinear",      # Resize to 1080p height, maintain aspect ratio
         "-c:v", "h264_videotoolbox",
@@ -184,8 +182,6 @@ def generate_proxy(
 
         if result.returncode == 0 and output_path.exists():
             logger.info(f"Successfully generated proxy in {duration:.1f}s: {output_path.name}")
-            logger.info(f"FFmpeg output: {result.stdout}")
-            logger.info(f"FFmpeg output: {result.stderr}")
             return ProxyResult(
                 source_path=source_path,
                 proxy_path=output_path,
