@@ -11,6 +11,7 @@ import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+import time
 from typing import Any, Tuple, cast
 import mlx.core as mx
 from pydantic import BaseModel, ValidationError
@@ -141,7 +142,6 @@ def describe_video(
     video_path: str,
     prompt: str | None = None,
     fps: float = 1.0,
-    subtitle: str | None = None,
     max_pixels: int = 224 * 224,
     **generate_kwargs
 ) -> dict:
@@ -204,6 +204,7 @@ def describe_video(
     pixel_values = inputs.get(
         "pixel_values_videos", inputs.get("pixel_values", None)
     )
+    logger.info(f"describe_video: fps: {fps}, total_frame: {video_inputs[0].shape[0]}, pixel_values type={type(pixel_values)} shape={getattr(pixel_values, 'shape', None)}")
     if pixel_values is None:
         raise ValueError("Please provide a valid video or image input.")
     pixel_values = mx.array(pixel_values)
@@ -249,6 +250,19 @@ def analyze_video_segment(
         Dictionary with VLM analysis results including trim suggestions.
     """
     model, processor = _get_or_load_model(model_name)
+
+    # Adjust FPS to avoid GPU timeouts on long videos
+    duration = get_video_duration(video_path) or 0
+    MAX_FRAMES = 180 # Limit total frames to prevent GPU timeout
+    
+    if duration > 0:
+        calculated_frames = duration * fps
+        while calculated_frames > MAX_FRAMES:
+            new_fps = fps / 2 
+            logger.info(f"Video too long ({duration:.1f}s), adjusting FPS from {fps} to {new_fps:.2f} to keep frames under {MAX_FRAMES}")
+            fps = new_fps
+            calculated_frames = duration * fps
+
     return describe_video(
         model,
         processor,
@@ -283,9 +297,36 @@ def analyze_clip(
     video_to_analyze = proxy_path if proxy_path and proxy_path.exists() else source_path
     duration = get_video_duration(video_to_analyze) or 0
 
-    # Analyze video with VLM
-    vlm_result = analyze_video_segment(video_to_analyze, model_name)
-    logger.info(f"VLM result for {video_to_analyze.name}: {vlm_result}")
+    # Check for cached analysis
+    json_path = video_to_analyze.with_suffix(".json")
+    vlm_result = None
+    
+    if json_path.exists():
+        try:
+            logger.info(f"Loading cached analysis from {json_path}")
+            with open(json_path, "r") as f:
+                vlm_result = json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load cached analysis from {json_path}: {e}")
+
+    if vlm_result is None:
+        # Analyze video with VLM
+        start_time = time.time()
+        vlm_result = analyze_video_segment(video_to_analyze, model_name)
+        elapsed_time = time.time() - start_time
+        logger.info(
+            f"VLM result for {video_to_analyze.name} ({duration}s) took {elapsed_time:.2f} seconds:\n"
+             f"  Trim: {vlm_result.get('trim_start_sec')}s to {vlm_result.get('trim_end_sec')}s\n"
+             f"  Reason: {vlm_result.get('trim_reason')}\n"
+             f"  Description: {vlm_result.get('clip_description')}\n"
+             f"  Name: {vlm_result.get('clip_name')}")
+        
+        # Save result to JSON
+        try:
+            with open(json_path, "w") as f:
+                json.dump(vlm_result, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save analysis to {json_path}: {e}")
 
     # Extract clip name from VLM suggestions
     clip_name = vlm_result.get("clip_name")
@@ -308,8 +349,8 @@ def analyze_clip(
         clip_name=clip_name,
         suggested_in_point=trim_start,
         suggested_out_point=trim_end,
-        vlm_response=vlm_result.get("raw_response"),
-        vlm_summary=vlm_result.get("reason"),
+        vlm_response=vlm_result.get("clip_description"),
+        vlm_summary=vlm_result.get("trim_reason"),
     )
 
 
