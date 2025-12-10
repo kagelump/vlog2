@@ -96,6 +96,7 @@ class TVASApp:
 
         # Stage 2: Generate edit proxies
         logger.info("Stage 2: Generating edit proxies...")
+        edit_proxy_results = []
         try:
             edit_proxy_results = generate_proxies_batch(
                 source_files,
@@ -107,9 +108,11 @@ class TVASApp:
             results["errors"].append(f"Edit proxy generation failed: {e}")
             logger.error(f"Edit proxy generation failed: {e}")
 
-        # Stage 3: AI Analysis (uses original files, AI proxies generated on-the-fly)
+        # Stage 3: AI Analysis (uses edit proxies)
         logger.info("Stage 3: Analyzing clips...")
-        clips_to_analyze: list[tuple[Path, Path | None]] = [(source_file, None) for source_file in source_files]
+        clips_to_analyze: list[tuple[Path, Path | None]] = [
+            (r.source_path, r.proxy_path) for r in edit_proxy_results if r.success and r.proxy_path
+        ]
         try:
             analyses = analyze_clips_batch(
                 clips_to_analyze,
@@ -119,13 +122,13 @@ class TVASApp:
             results["clips_analyzed"] = len(analyses)
 
             # Export analysis for debugging
-            analysis_json = cache_dir / "analysis.json"
+            analysis_json = self.proxy_path / project_name / "analysis.json"
             export_analysis_json(analyses, analysis_json)
             logger.info(f"Analysis exported to {analysis_json}")
         except Exception as e:
             results["errors"].append(f"Analysis failed: {e}")
             logger.error(f"Analysis failed: {e}")
-            return results
+            raise e
 
         # Stage 4: Generate Timeline (user review happens in DaVinci Resolve)
         logger.info("Stage 4: Generating timeline...")

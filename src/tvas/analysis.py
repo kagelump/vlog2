@@ -4,18 +4,31 @@ This module handles AI-powered trim detection using Qwen3 VL (8B) via mlx-vlm,
 using native video processing for start/end point detection.
 """
 
+from collections.abc import Sequence
 import json
 import logging
 import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-
+from typing import Any, Tuple, cast
 import mlx.core as mx
-from mlx_vlm import load
+from pydantic import BaseModel, ValidationError
+
+
+import torch
+from transformers.video_utils import load_video
+from transformers import AutoVideoProcessor
+
 from mlx_vlm.video_generate import process_vision_info
+from mlx_vlm.video_generate import generate
+from mlx_vlm import generate as mlx_vlm_generate
+from mlx_vlm import load
 
 from tvas.proxy import get_video_duration
+
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +38,19 @@ DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
 # Video sampling parameters
 VIDEO_FPS = 10.0  # Sample at 10fps for analysis
 VIDEO_SEGMENT_DURATION = 5.0  # Analyze first/last 5 seconds
+
+TRIM_DETECTION_PROMPT = """
+Analyze the video and suggest appropriate trim start and end points
+to remove any unnecessary content at the beginning or end of the clip.
+Provide your suggestions in seconds along with a brief explanation.
+
+Respond in JSON format with the following fields:
+- trim_start_sec: Suggested start time in seconds (float) or null if no trim needed.
+- trim_end_sec: Suggested end time in seconds (float) or null if no trim needed.
+- trim_reason: A brief explanation of your trim suggestions.
+- clip_description: A short summary of the clip's content.
+- clip_name: A concise name (2-5 words) for the clip based on its content in lower_snake_case.
+"""
 
 # Cache for loaded models to avoid reloading
 # Structure: {model_name: (model, processor)}
@@ -38,6 +64,13 @@ class ConfidenceLevel(Enum):
     MEDIUM = "medium"  # VLM with uncertain reasoning
     LOW = "low"  # VLM failed or unclear
 
+class DescribeOutput(BaseModel):
+    """Structured output from the video description model."""
+    trim_start_sec: float | None
+    trim_end_sec: float | None
+    trim_reason: str  | None
+    clip_description: str | None
+    clip_name: str | None
 
 @dataclass
 class ClipAnalysis:
@@ -69,6 +102,16 @@ def check_model_available(model_name: str = DEFAULT_VLM_MODEL) -> bool:
     return True
 
 
+def validate_model_output(parsed: Any) -> dict:
+    """Validate parsed JSON from the model against DescribeOutput.
+
+    Returns the dictified model if valid, otherwise raises ValidationError.
+    """
+    # Use Pydantic v2 API (model_validate + model_dump) for forward compatibility
+    obj = DescribeOutput.model_validate(parsed)
+    return obj.model_dump()
+
+
 def _get_or_load_model(model_name: str = DEFAULT_VLM_MODEL):
     """Get a cached model or load it.
 
@@ -92,6 +135,102 @@ def _get_or_load_model(model_name: str = DEFAULT_VLM_MODEL):
         return _model_cache[model_name]
 
 
+def describe_video(
+    model,
+    processor,
+    video_path: str,
+    prompt: str | None = None,
+    fps: float = 1.0,
+    subtitle: str | None = None,
+    max_pixels: int = 224 * 224,
+    **generate_kwargs
+) -> dict:
+    """
+    Describe a single video using mlx-vlm.
+
+    Args:
+        model: The loaded MLX-VLM model
+        processor: The loaded processor
+        video_path: Path to the video file
+        prompt: Optional prompt template. If None, uses default template.
+        fps: Frames per second to sample from video
+        subtitle: Optional subtitle text to include in the prompt
+        max_pixels: Maximum pixel size for frames
+        **generate_kwargs: Additional arguments passed to generate()
+
+    Returns:
+        dict: Validated description output as dictionary
+
+    Raises:
+        Exception: If the model output cannot be parsed or validated
+    """
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "video",
+                    "video": video_path,
+                    "fps": fps,
+                    "max_pixels": max_pixels,
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    _, video_inputs = cast(Tuple[Sequence[Any], Sequence[Any]], process_vision_info(messages))
+
+    inputs = processor(
+        text=[text],
+        images=None,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+        video_metadata={'fps': fps, 'total_num_frames': video_inputs[0].shape[0]}
+    )
+
+    input_ids = mx.array(inputs["input_ids"])
+    mask = mx.array(inputs["attention_mask"])
+    video_grid_thw = mx.array(inputs["video_grid_thw"])
+
+    # include kwargs for video layout grid info
+    extra = {"video_grid_thw": video_grid_thw}
+
+    pixel_values = inputs.get(
+        "pixel_values_videos", inputs.get("pixel_values", None)
+    )
+    if pixel_values is None:
+        raise ValueError("Please provide a valid video or image input.")
+    pixel_values = mx.array(pixel_values)
+
+    response = generate(
+        model=model,
+        processor=processor,
+        prompt=text,
+        input_ids=input_ids,
+        pixel_values=pixel_values,
+        mask=mask,
+        **extra,
+        **generate_kwargs,
+    )
+
+    try:
+        parsed = json.loads(response.text)
+    except Exception:
+        raise Exception(f'Could not deserialize {response.text}')
+
+    # validate and return structured output
+    try:
+        return validate_model_output(parsed)
+    except ValidationError as e:
+        # return raw parsed JSON but surface validation error in message
+        raise Exception(f'Output did not match expected schema: {e}\nRaw: {parsed}')
+
 def analyze_video_segment(
     video_path: Path,
     model_name: str = DEFAULT_VLM_MODEL,
@@ -110,131 +249,14 @@ def analyze_video_segment(
         Dictionary with VLM analysis results including trim suggestions.
     """
     model, processor = _get_or_load_model(model_name)
-    if model is None or processor is None:
-        raise RuntimeError(f"Failed to load model: {model_name}")
-
-    # Get video duration to determine segment strategy
-    duration = get_video_duration(video_path) or 0
-    
-    # Determine analysis strategy
-    if duration <= 15:
-        # Short video: analyze entire clip
-        prompt = f"""Analyze this {duration:.1f}s video clip and provide:
-
-1. A short descriptive name for the clip (2-4 words, snake_case, describing the main action/subject)
-   Examples: "airport_lobby_walk", "iceberg_passing", "sunset_timelapse", "coffee_shop_entrance"
-2. Recommended start time in seconds (trim_start: number or null if no trim needed)
-3. Recommended end time in seconds (trim_end: number or null if no trim needed)  
-
-Respond with ONLY valid JSON:
-{{"clip_name": "descriptive_name", "trim_start": null or number, "trim_end": null or number}}
-
-Be conservative - only suggest trimming if there are clear quality issues at the beginning or end."""
-    else:
-        # Long video: focus on first/last 5 seconds
-        prompt = f"""Analyze this {duration:.1f}s video clip and provide:
-
-1. A short descriptive name for the clip (2-4 words, snake_case, describing the main action/subject)
-   Examples: "mountain_hike_trail", "street_market_vendor", "drone_ocean_shot"
-2. Recommended start time in seconds if start needs trimming (trim_start: number or null)
-3. Recommended end time in seconds if end needs trimming (trim_end: number or null)
-
-Respond with ONLY valid JSON:
-{{"clip_name": "descriptive_name", "trim_start": null or number, "trim_end": null or number}}
-
-Example: If first 3 seconds should be trimmed, set trim_start to 3.0. If last 4 seconds should be trimmed and video is 60s, set trim_end to 56.0."""
-
-    try:
-        # Prepare video input for mlx-vlm
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "video",
-                        "video": str(video_path),
-                        "fps": fps,
-                        "max_pixels": max_pixels,
-                    },
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ]
-
-        # Process with mlx-vlm
-        text = processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        
-        image_inputs, video_inputs, video_kwargs = process_vision_info(messages, True)
-        
-        inputs = processor(
-            text=[text],
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
-            return_tensors="pt",
-        )
-
-        input_ids = mx.array(inputs["input_ids"])
-        pixel_values = mx.array(
-            inputs.get("pixel_values_videos", inputs.get("pixel_values"))
-        )
-        mask = mx.array(inputs["attention_mask"])
-
-        # Prepare kwargs for generation
-        gen_kwargs = {}
-        if inputs.get("video_grid_thw") is not None:
-            gen_kwargs["video_grid_thw"] = mx.array(inputs["video_grid_thw"])
-        if inputs.get("image_grid_thw") is not None:
-            gen_kwargs["image_grid_thw"] = mx.array(inputs["image_grid_thw"])
-
-        # Generate response
-        from mlx_vlm.generate import generate as mlx_generate
-        
-        output = mlx_generate(
-            model,
-            processor,
-            input_ids,  # type: ignore[arg-type]
-            pixel_values,  # type: ignore[arg-type]
-            max_tokens=512,
-            verbose=False,
-            mask=mask,
-            **gen_kwargs,
-        )
-
-        # Extract text from GenerationResult
-        response_text = str(output)
-
-        # Try to parse JSON from response
-        try:
-            start = response_text.find("{")
-            end = response_text.rfind("}") + 1
-            if start >= 0 and end > start:
-                json_str = response_text[start:end]
-                data = json.loads(json_str)
-                return {
-                    "clip_name": data.get("clip_name"),
-                    "reason": data.get("reason", ""),
-                    "trim_start": data.get("trim_start"),
-                    "trim_end": data.get("trim_end"),
-                    "raw_response": response_text,
-                }
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse JSON from VLM response: {response_text[:200]}")
-
-        # Fallback: no trim, no name
-        return {
-            "clip_name": None,
-            "reason": response_text[:200],
-            "trim_start": None,
-            "trim_end": None,
-            "raw_response": response_text,
-        }
-
-    except Exception as e:
-        logger.error(f"VLM analysis failed for {video_path}: {e}")
-        raise
+    return describe_video(
+        model,
+        processor,
+        str(video_path),
+        prompt=TRIM_DETECTION_PROMPT,
+        fps=fps,
+        max_pixels=max_pixels,
+    )
 
 
 def analyze_clip(
@@ -263,13 +285,14 @@ def analyze_clip(
 
     # Analyze video with VLM
     vlm_result = analyze_video_segment(video_to_analyze, model_name)
+    logger.info(f"VLM result for {video_to_analyze.name}: {vlm_result}")
 
     # Extract clip name from VLM suggestions
     clip_name = vlm_result.get("clip_name")
     
     # Determine trim points from VLM suggestions
-    trim_start = vlm_result.get("trim_start")
-    trim_end = vlm_result.get("trim_end")
+    trim_start = vlm_result.get("trim_start_sec")
+    trim_end = vlm_result.get("trim_end_sec")
 
     # Determine confidence based on whether VLM provided suggestions
     if trim_start is not None or trim_end is not None:
