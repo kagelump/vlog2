@@ -41,14 +41,31 @@ VIDEO_FPS = 10.0  # Sample at 10fps for analysis
 VIDEO_SEGMENT_DURATION = 5.0  # Analyze first/last 5 seconds
 
 TRIM_DETECTION_PROMPT = """
-Analyze the video and suggest appropriate trim start and end points
-to remove any unnecessary content at the beginning or end of the clip.
+Analyze the video and suggest appropriate start and end points
+to remove any unnecessary content (eg. blurry, reframing, etc) at the beginning or end of the clip.
 Provide your suggestions in seconds along with a brief explanation.
 
+Determine the primary shot type - based on standard film and editing terminology — choose one of the following:
+
+pov: The camera represents the perspective of a character or subject.
+insert: A close-up or detailed shot of an object, text, or small action that provides specific information.
+establishing: A wide or introductory shot that sets the scene or location context.
+Add descriptive tags that apply to the shot. Choose all that fit from the following list:
+
+static: The camera does not move.
+dynamic: The camera moves (pans, tilts, tracks, zooms, etc.).
+closeup: Tight framing around a person's face or an object.
+medium: Frames the subject roughly from the waist up.
+wide: Shows the subject and significant background context.
+
+Describe this video clip using 1-2 sentences. Then give it a short name to use as a filename. Use snake_case.
+
 Respond in JSON format with the following fields:
-- trim_start_sec: Suggested start time in seconds (float) or null if no trim needed.
-- trim_end_sec: Suggested end time in seconds (float) or null if no trim needed.
+- start_sec: Suggested start time in seconds (float) or null if no trim needed.
+- end_sec: Suggested end time in seconds (float) or null if no trim needed.
 - trim_reason: A brief explanation of your trim suggestions.
+- shot_type: The primary shot type (pov, insert, establishing).
+- shot_tags: A list of descriptive tags (static, dynamic, closeup, medium, wide).
 - clip_description: A short summary of the clip's content.
 - clip_name: A concise name (2-5 words) for the clip based on its content in lower_snake_case.
 """
@@ -67,11 +84,13 @@ class ConfidenceLevel(Enum):
 
 class DescribeOutput(BaseModel):
     """Structured output from the video description model."""
-    trim_start_sec: float | None
-    trim_end_sec: float | None
+    start_sec: float | None
+    end_sec: float | None
     trim_reason: str  | None
-    clip_description: str | None
-    clip_name: str | None
+    shot_type: str
+    shot_tags: list[str]
+    clip_description: str
+    clip_name: str
 
 @dataclass
 class ClipAnalysis:
@@ -86,6 +105,7 @@ class ClipAnalysis:
     suggested_out_point: float | None = None
     vlm_response: str | None = None
     vlm_summary: str | None = None
+    timestamp: float = 0.0
 
 
 def check_model_available(model_name: str = DEFAULT_VLM_MODEL) -> bool:
@@ -253,7 +273,7 @@ def analyze_video_segment(
 
     # Adjust FPS to avoid GPU timeouts on long videos
     duration = get_video_duration(video_path) or 0
-    MAX_FRAMES = 180 # Limit total frames to prevent GPU timeout
+    MAX_FRAMES = 128 # Limit total frames to prevent GPU timeout
     
     if duration > 0:
         calculated_frames = duration * fps
@@ -316,8 +336,9 @@ def analyze_clip(
         elapsed_time = time.time() - start_time
         logger.info(
             f"VLM result for {video_to_analyze.name} ({duration}s) took {elapsed_time:.2f} seconds:\n"
-             f"  Trim: {vlm_result.get('trim_start_sec')}s to {vlm_result.get('trim_end_sec')}s\n"
+             f"  In/Out: {vlm_result.get('start_sec')}s to {vlm_result.get('end_sec')}s\n"
              f"  Reason: {vlm_result.get('trim_reason')}\n"
+             f"  Shot Type/Tags: {vlm_result.get('shot_type')} ({', '.join(vlm_result.get('shot_tags', []))})\n"
              f"  Description: {vlm_result.get('clip_description')}\n"
              f"  Name: {vlm_result.get('clip_name')}")
         
@@ -351,6 +372,7 @@ def analyze_clip(
         suggested_out_point=trim_end,
         vlm_response=vlm_result.get("clip_description"),
         vlm_summary=vlm_result.get("trim_reason"),
+        timestamp=source_path.stat().st_mtime,
     )
 
 

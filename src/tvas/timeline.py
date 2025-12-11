@@ -131,6 +131,9 @@ def create_timeline_from_analysis(
     """
     from tvas.analysis import ClipAnalysis
 
+    # Sort analyses by timestamp
+    analyses.sort(key=lambda x: x.timestamp)
+
     timeline_clips = []
 
     for analysis in analyses:
@@ -193,6 +196,7 @@ def export_analysis_json(
             "suggested_out_point": analysis.suggested_out_point,
             "vlm_response": analysis.vlm_response,
             "vlm_summary": analysis.vlm_summary,
+            "timestamp": analysis.timestamp,
         }
         data["clips"].append(clip_data)
 
