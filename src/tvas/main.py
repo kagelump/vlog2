@@ -113,6 +113,16 @@ class TVASApp:
         clips_to_analyze: list[tuple[Path, Path | None]] = [
             (r.source_path, r.proxy_path) for r in edit_proxy_results if r.success and r.proxy_path
         ]
+
+        # Add any existing proxies in the directory that weren't just generated/processed
+        # This allows for cumulative processing/export
+        if proxy_dir.exists():
+            current_proxies = {p for _, p in clips_to_analyze if p}
+            for proxy_file in proxy_dir.glob("*.mp4"):
+                if proxy_file not in current_proxies:
+                    logger.info(f"Found existing proxy: {proxy_file.name}")
+                    # For existing proxies, we use the proxy path as source if we can't determine the original
+                    clips_to_analyze.append((proxy_file, proxy_file))
         try:
             analyses = analyze_clips_batch(
                 clips_to_analyze,

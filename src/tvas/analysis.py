@@ -323,9 +323,9 @@ def analyze_clip(
     
     if json_path.exists():
         try:
-            logger.info(f"Loading cached analysis from {json_path}")
             with open(json_path, "r") as f:
                 vlm_result = json.load(f)
+            logger.info(f"Using cached analysis for {video_to_analyze.name}")
         except Exception as e:
             logger.warning(f"Failed to load cached analysis from {json_path}: {e}")
 
@@ -394,7 +394,7 @@ def analyze_clips_batch(
     results = []
 
     for i, (source_path, proxy_path) in enumerate(clips):
-        logger.info(f"Analyzing clip {i + 1}/{len(clips)}: {source_path.name}")
+        logger.info(f"Processing clip {i + 1}/{len(clips)}: {source_path.name}")
         result = analyze_clip(source_path, proxy_path, use_vlm, model_name)
         results.append(result)
 
