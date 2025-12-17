@@ -134,7 +134,7 @@ class TVASApp:
         logger.info("Stage 4: Generating timeline...")
         timeline_path = (
             self.proxy_path
-            / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}"
+            / project_name
             / f"{project_name}_timeline.otio"
         )
 

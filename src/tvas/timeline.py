@@ -4,6 +4,7 @@ This module generates OpenTimelineIO timelines from analyzed clips
 for import into DaVinci Resolve.
 """
 
+import csv
 import json
 import logging
 from dataclasses import dataclass
@@ -35,6 +36,24 @@ class TimelineConfig:
 
     name: str = "TVAS Timeline"
     framerate: float = 60.
+
+
+def create_csv_export(clips: list[TimelineClip], otio_path: Path) -> None:
+    """Create a CSV export of the clips alongside the OTIO file."""
+    csv_path = otio_path.with_suffix(".csv")
+    try:
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["File Name", "Clip Directory", "EDL Clip Name"])
+            for clip in clips:
+                writer.writerow([
+                    clip.source_path.name,
+                    str(clip.source_path.parent),
+                    clip.name,
+                ])
+        logger.info(f"CSV export created: {csv_path}")
+    except Exception as e:
+        logger.error(f"Failed to write CSV export: {e}")
 
 
 def create_timeline(
@@ -108,6 +127,7 @@ def create_timeline(
     try:
         otio.adapters.write_to_file(timeline, str(output_path))
         logger.info(f"Timeline created: {output_path}")
+        create_csv_export(clips, output_path)
         return output_path
     except Exception as e:
         logger.error(f"Failed to write timeline: {e}")
