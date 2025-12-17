@@ -164,7 +164,7 @@ def get_video_files(volume_path: Path, camera_type: CameraType) -> list[VideoFil
     search_path: Path = volume_path
 
     if camera_type == CameraType.SONY_A7C:
-        search_path = volume_path / "PRIVATE" / "M4ROOT"
+        search_path = volume_path / "PRIVATE" / "M4ROOT" / "CLIP"
         extensions = [".MP4", ".mp4", ".MTS", ".mts"]
     elif camera_type == CameraType.DJI_POCKET3:
         search_path = volume_path / "DCIM"

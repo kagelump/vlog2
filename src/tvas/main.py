@@ -49,7 +49,7 @@ class TVASApp:
         """
         # Auto-detect ACASIS volume for archival
         if archival_path is None:
-            acasis_path = Path("/Volumes/ACASIS")
+            acasis_path = Path("/Volumes/Acasis")
             if acasis_path.exists():
                 self.archival_path = acasis_path
                 logger.info(f"Auto-detected archival storage: {acasis_path}")
@@ -395,7 +395,7 @@ Examples:
     parser.add_argument(
         "--archival-path",
         type=Path,
-        help="Path for archival storage (auto-detects /Volumes/ACASIS if not specified)",
+        help="Path for archival storage (auto-detects /Volumes/Acasis if not specified)",
     )
 
     parser.add_argument(
