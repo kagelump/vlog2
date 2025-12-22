@@ -113,6 +113,7 @@ def analyze_photo_vlm(
     # First prompt: Get star rating
     rating_prompt = """Analyze this photograph for technical quality, sharpness, and composition. Give it a star rating from 1 to 5. Output only the integer."""
 
+    rating_response = ""
     try:
         logger.debug(f"Analyzing rating for {photo_path.name}")
         formatted_prompt = apply_chat_template(
@@ -148,6 +149,7 @@ def analyze_photo_vlm(
     # Second prompt: Get keywords
     keywords_prompt = """List 5 keywords describing the image content."""
 
+    keywords_response = ""
     try:
         logger.debug(f"Analyzing keywords for {photo_path.name}")
         formatted_prompt = apply_chat_template(
@@ -166,7 +168,6 @@ def analyze_photo_vlm(
         # Parse keywords from response
         # Response might be: "sunset, beach, ocean, waves, sky" or "1. sunset\n2. beach..."
         keywords = []
-        response_lower = keywords_response.lower()
         # Remove common numbering/bullets
         for sep in ["\n", ",", ";", "|"]:
             if sep in keywords_response:
@@ -200,6 +201,7 @@ def analyze_photo_vlm(
     # Third prompt: Get description/caption
     description_prompt = """Write a brief caption for this photo in one sentence, describing what you see."""
 
+    description_response = ""
     try:
         logger.debug(f"Analyzing description for {photo_path.name}")
         formatted_prompt = apply_chat_template(
