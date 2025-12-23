@@ -273,7 +273,7 @@ def analyze_video_segment(
 
     # Adjust FPS to avoid GPU timeouts on long videos
     duration = get_video_duration(video_path) or 0
-    MAX_FRAMES = 128 # Limit total frames to prevent GPU timeout
+    MAX_FRAMES = 110 # Limit total frames to prevent GPU timeout
     
     if duration > 0:
         calculated_frames = duration * fps
