@@ -4,12 +4,22 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 
 ## Features
 
+### TVAS (Travel Vlog Automation System)
+
 - **SD Card Detection**: Automatically detects camera SD cards (Sony A7C, DJI Pocket 3, iPhone, Insta360)
 - **Smart Ingestion**: Copies files with SHA256 verification and organized folder structure
 - **AI Analysis**: Uses Qwen3-VL (8B) via mlx-vlm for intelligent junk detection on Apple Silicon
 - **OpenCV Heuristics**: Fast blur and darkness detection for pre-screening
 - **Review UI**: Native macOS UI (Toga) for reviewing AI decisions
 - **Timeline Generation**: Creates OpenTimelineIO files for DaVinci Resolve import
+
+### TPRS (Travel Photo Rating System)
+
+- **JPEG Photo Scanning**: Scans SD cards for JPEG photos
+- **AI Photo Rating**: Uses Qwen VL to analyze photo quality and rate 1-5 stars
+- **Keyword Extraction**: Automatically generates 5 descriptive keywords for each photo
+- **Caption Generation**: Creates captions to help distinguish similar high-rated photos
+- **XMP Sidecar Generation**: Outputs XMP files compatible with DxO PhotoLab and other tools
 
 ## Installation
 
@@ -47,29 +57,68 @@ pip install -e ".[full]"
 
 ## Usage
 
-### Watch for SD Cards
+### TVAS - Video Analysis
+
+#### Watch for SD Cards
 
 ```bash
 tvas --watch
 ```
 
-### Process a Specific Volume
+#### Process a Specific Volume
 
 ```bash
 tvas --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
 ```
 
-### Skip UI (Auto-approve AI Decisions)
+#### Skip UI (Auto-approve AI Decisions)
 
 ```bash
 tvas --volume /Volumes/SONY_A7C --auto-approve
 ```
 
-### Disable VLM (Use OpenCV Only)
+#### Disable VLM (Use OpenCV Only)
 
 ```bash
 tvas --volume /Volumes/DJI_POCKET3 --no-vlm
 ```
+
+### TPRS - Photo Rating System
+
+#### Process Photos from SD Card
+
+```bash
+tprs /Volumes/SD_CARD
+```
+
+This will:
+- Scan for all JPEG photos on the SD card
+- Analyze each photo for quality, sharpness, and composition
+- Generate XMP sidecar files with:
+  - `xmp:Rating` - Star rating (1-5)
+  - `dc:subject` - 5 keywords describing the image
+  - `dc:description` - Caption for the photo
+
+#### Output XMP Files to Different Directory
+
+```bash
+tprs /Volumes/SD_CARD --output /path/to/xmp/files
+```
+
+#### Preview Photos Without Processing
+
+```bash
+tprs /Volumes/SD_CARD --dry-run
+```
+
+#### Use with DxO PhotoLab
+
+After running `tprs`, the XMP sidecar files will be created next to your photos. When you import the photos into DxO PhotoLab:
+
+1. The star ratings appear in the rating field
+2. Keywords appear in the "Keywords" palette
+3. Descriptions appear in the metadata
+4. You can search for keywords like "Sunset", "Cat", or "Blurry" to find photos without looking at them
 
 ## Project Structure
 

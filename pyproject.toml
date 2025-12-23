@@ -36,6 +36,7 @@ dev = [
 
 [project.scripts]
 tvas = "tvas.main:main"
+tprs = "tvas.tprs_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
