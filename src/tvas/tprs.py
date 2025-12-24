@@ -107,130 +107,100 @@ def analyze_photo_vlm(
     image_path_str = str(temp_path) if temp_path else str(photo_path)
 
     try:
-        # First prompt: Get star rating
-        rating_prompt = """Analyze this photograph for technical quality, sharpness, and composition. Give it a star rating from 1 to 5. Output only the integer."""
+        # Single prompt for JSON output
+        json_prompt = """Analyze this photograph and provide a JSON object with the following fields:
+1. "rating": One of the following categories based on technical quality and composition:
+   - "UNUSABLE": Excessive blur, out of focus, or severe exposure issues.
+   - "BAD": Poor composition, distracting elements, or minor technical issues.
+   - "OK": Acceptable quality, standard composition, nothing special.
+   - "GOOD": Sharp, well-exposed, good composition, interesting subject.
+   - "EXCELLENT": Exceptional technical quality, compelling composition, artistic merit.
+2. "keywords": A list of exactly 5 keywords describing the image content.
+3. "description": A brief one-sentence caption describing what you see.
 
-        rating_response = ""
+Example output:
+{
+  "rating": "GOOD",
+  "keywords": ["sunset", "beach", "ocean", "waves", "sky"],
+  "description": "A beautiful sunset over the ocean with waves crashing on the beach."
+}
+Output only the JSON object."""
+
+        logger.debug(f"Analyzing {photo_path.name} with JSON prompt")
+        formatted_prompt = apply_chat_template(
+            processor, config, json_prompt, num_images=1
+        )
+
+        response = generate(
+            model,
+            processor,
+            formatted_prompt,
+            [image_path_str],
+            verbose=False,
+            max_tokens=500,
+        )
+        
+        # Handle GenerationResult object
+        if hasattr(response, "text"):
+            response_text = response.text
+        else:
+            response_text = str(response)
+
+        # Clean up response text (remove markdown code blocks if present)
+        clean_text = response_text.strip()
+        if clean_text.startswith("```json"):
+            clean_text = clean_text[7:]
+        if clean_text.startswith("```"):
+            clean_text = clean_text[3:]
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+
         try:
-            logger.debug(f"Analyzing rating for {photo_path.name}")
-            formatted_prompt = apply_chat_template(
-                processor, config, rating_prompt, num_images=1
-            )
-
-            rating_response = generate(
-                model,
-                processor,
-                formatted_prompt,
-                [image_path_str],
-                verbose=False,
-                max_tokens=10,
-            )
-
-            # Extract rating (should be just a number)
-            rating_str = rating_response.strip()
-            # Try to extract first digit
-            rating = 3  # default
-            for char in rating_str:
-                if char.isdigit():
-                    rating = int(char)
-                    if 1 <= rating <= 5:
-                        break
-            if not (1 <= rating <= 5):
-                rating = 3
-
-            logger.debug(f"Rating: {rating}")
-        except Exception as e:
-            logger.error(f"Rating analysis failed: {e}")
-            rating = 3
-
-        # Second prompt: Get keywords
-        keywords_prompt = """List 5 keywords describing the image content."""
-
-        keywords_response = ""
-        try:
-            logger.debug(f"Analyzing keywords for {photo_path.name}")
-            formatted_prompt = apply_chat_template(
-                processor, config, keywords_prompt, num_images=1
-            )
-
-            keywords_response = generate(
-                model,
-                processor,
-                formatted_prompt,
-                [image_path_str],
-                verbose=False,
-                max_tokens=100,
-            )
-
-            # Parse keywords from response
-            # Response might be: "sunset, beach, ocean, waves, sky" or "1. sunset\n2. beach..."
-            keywords = []
-            # Remove common numbering/bullets
-            for sep in ["\n", ",", ";", "|"]:
-                if sep in keywords_response:
-                    parts = keywords_response.split(sep)
-                    for part in parts:
-                        # Clean up the part
-                        clean = part.strip()
-                        # Remove leading numbers/bullets
-                        clean = clean.lstrip("0123456789.- ")
-                        if clean and len(clean) > 1:
-                            keywords.append(clean)
-                        if len(keywords) >= 5:
-                            break
-                    break
-
-            # If we didn't parse any keywords, split by spaces
-            if not keywords:
-                words = keywords_response.split()[:5]
-                keywords = [w.strip(".,;:") for w in words if len(w.strip(".,;:")) > 1]
-
-            # Ensure we have exactly 5 keywords
+            data = json.loads(clean_text)
+            
+            rating_str = str(data.get("rating", "OK")).upper()
+            rating_map = {
+                "UNUSABLE": 1,
+                "BAD": 2,
+                "OK": 3,
+                "GOOD": 4,
+                "EXCELLENT": 5
+            }
+            rating = rating_map.get(rating_str, 3)
+                
+            keywords = data.get("keywords", [])
+            if not isinstance(keywords, list):
+                keywords = str(keywords).split(",")
+            
+            # Ensure 5 keywords
+            keywords = [str(k).strip() for k in keywords if str(k).strip()]
             while len(keywords) < 5:
                 keywords.append("general")
             keywords = keywords[:5]
-
-            logger.debug(f"Keywords: {keywords}")
-        except Exception as e:
-            logger.error(f"Keyword analysis failed: {e}")
-            keywords = ["photo", "image", "travel", "memory", "capture"]
-
-        # Third prompt: Get description/caption
-        description_prompt = """Write a brief caption for this photo in one sentence, describing what you see."""
-
-        description_response = ""
-        try:
-            logger.debug(f"Analyzing description for {photo_path.name}")
-            formatted_prompt = apply_chat_template(
-                processor, config, description_prompt, num_images=1
-            )
-
-            description_response = generate(
-                model,
-                processor,
-                formatted_prompt,
-                [image_path_str],
-                verbose=False,
-                max_tokens=150,
-            )
-
-            description = description_response.strip()
-            # Limit length
+            
+            description = str(data.get("description", "Photo from travel collection."))
             if len(description) > 300:
                 description = description[:297] + "..."
-
-            logger.debug(f"Description: {description[:50]}...")
-        except Exception as e:
-            logger.error(f"Description analysis failed: {e}")
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed: {e}. Response: {response_text}")
+            # Fallback
+            rating = 3
+            keywords = ["photo", "image", "travel", "memory", "capture"]
             description = "Photo from travel collection."
-
+            
         return PhotoAnalysis(
             photo_path=photo_path,
             rating=rating,
             keywords=keywords,
             description=description,
-            raw_response=f"Rating: {rating_response}\nKeywords: {keywords_response}\nDescription: {description_response}",
+            raw_response=response_text,
         )
+
+    except Exception as e:
+        logger.error(f"Analysis failed: {e}")
+        return None
     finally:
         if temp_path and temp_path.exists():
             try:
