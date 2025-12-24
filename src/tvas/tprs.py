@@ -256,13 +256,25 @@ Output only the JSON object."""
                 "EXCELLENT": 5
             }
             rating = rating_map.get(rating_str, 3)
-                
+            
+            primary_subject = data.get("primary_subject")
+            primary_subject_bounding_box = data.get("primary_subject_bounding_box")
+
             keywords = data.get("keywords", [])
             if not isinstance(keywords, list):
                 keywords = str(keywords).split(",")
             
             # Ensure 5 keywords
             keywords = [str(k).strip() for k in keywords if str(k).strip()]
+            
+            # Prepend primary_subject if available
+            if primary_subject:
+                ps_clean = str(primary_subject).strip()
+                if ps_clean:
+                    if ps_clean in keywords:
+                        keywords.remove(ps_clean)
+                    keywords.insert(0, ps_clean)
+
             while len(keywords) < 5:
                 keywords.append("general")
             keywords = keywords[:5]
@@ -270,9 +282,6 @@ Output only the JSON object."""
             description = str(data.get("description", "Photo from travel collection."))
             if len(description) > 300:
                 description = description[:297] + "..."
-            
-            primary_subject = data.get("primary_subject")
-            primary_subject_bounding_box = data.get("primary_subject_bounding_box")
             
             # Secondary analysis: Check subject sharpness
             if primary_subject and primary_subject_bounding_box and isinstance(primary_subject_bounding_box, list) and len(primary_subject_bounding_box) == 4:
