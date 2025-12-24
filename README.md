@@ -9,7 +9,7 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 - **SD Card Detection**: Automatically detects camera SD cards (Sony A7C, DJI Pocket 3, iPhone, Insta360)
 - **Smart Ingestion**: Copies files with SHA256 verification and organized folder structure
 - **AI Analysis**: Uses Qwen3-VL (8B) via mlx-vlm for intelligent junk detection on Apple Silicon
-- **OpenCV Heuristics**: Fast blur and darkness detection for pre-screening
+- **OpenCV Pre-screening**: Fast blur and darkness detection before VLM analysis
 - **Review UI**: Native macOS UI (Toga) for reviewing AI decisions
 - **Timeline Generation**: Creates OpenTimelineIO files for DaVinci Resolve import
 
@@ -27,7 +27,8 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 
 - Python 3.11+
 - FFmpeg (for proxy generation and video analysis)
-- Apple Silicon Mac (M1/M2/M3/M4) for VLM-based analysis with mlx-vlm
+- OpenCV (for frame extraction and pre-screening)
+- Apple Silicon Mac (M1/M2/M3/M4) - **required** for mlx-vlm VLM analysis
 
 ### macOS (Homebrew)
 
@@ -35,11 +36,11 @@ Automate vlog ingestion, junk detection, and DaVinci Resolve import.
 # Install system dependencies
 brew install python@3.11 ffmpeg
 
-# Install TVAS (with all features including VLM)
+# Install TVAS with all features
 pip install -e ".[full]"
 ```
 
-The VLM model (`mlx-community/Qwen3-VL-8B-Instruct-8bit`) will be automatically downloaded from HuggingFace on first use.
+The VLM model (`mlx-community/Qwen3-VL-8B-Instruct-8bit`) will be automatically downloaded from HuggingFace on first use (~6GB).
 
 ### Install from Source
 
@@ -48,12 +49,6 @@ git clone https://github.com/kagelump/vlog2.git
 cd vlog2
 pip install -e ".[full]"
 ```
-
-### Optional Dependencies
-
-- **VLM only**: `pip install -e ".[vlm]"` - For AI-powered junk detection
-- **CV only**: `pip install -e ".[cv]"` - For OpenCV-based analysis
-- **UI only**: `pip install -e ".[ui]"` - For the native macOS review UI
 
 ## Usage
 
@@ -134,19 +129,17 @@ After running `tprs`, the XMP sidecar files will be created next to your photos.
 ## Pipeline Stages
 
 1. **Ingestion**: Copy files from SD card with verification
-2. **Proxy Generation**: Create low-res AI proxies using FFmpeg
-3. **AI Analysis**: Detect junk clips using Qwen3 VL (8B) + OpenCV
-4. **User Review**: Review and override AI decisions in Toga UI
-5. **Timeline Generation**: Export OpenTimelineIO for DaVinci Resolve
+2. **Proxy Generation**: Create ProRes edit proxies using FFmpeg
+3. **AI Analysis**: Generate clip names and suggest trim points using Qwen3 VL (8B)
+4. **Timeline Generation**: Export OpenTimelineIO for DaVinci Resolve (review/editing done in Resolve)
 
 ## Configuration
 
 | Option | Description | Default |
-|--------|-------------|---------|
-| `--base-path` | Base path for vlog storage | `~/Movies/Vlog` |
+|--------|-------------|---------|  
+| `--archival-path` | Path for archival storage (auto-detects ACASIS) | Auto-detect |
+| `--proxy-path` | Path for edit proxies and cache | `~/Movies/Vlog` |
 | `--model` | mlx-vlm model for VLM | `mlx-community/Qwen3-VL-8B-Instruct-8bit` |
-| `--auto-approve` | Skip UI, approve all AI decisions | `False` |
-| `--no-vlm` | Disable VLM, use OpenCV only | `False` |
 
 ## Development
 

@@ -7,7 +7,9 @@ and organization of video files by camera source and date.
 import hashlib
 import logging
 import os
+import platform
 import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -17,6 +19,23 @@ from typing import Callable
 logger = logging.getLogger(__name__)
 
 
+def format_file_size(size_bytes: int) -> str:
+    """Format file size in human-readable format.
+    
+    Args:
+        size_bytes: Size in bytes.
+    
+    Returns:
+        Formatted string (e.g., "1.5 GB", "250 MB").
+    """
+    size = float(size_bytes)
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024.0:
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} PB"
+
+
 class CameraType(Enum):
     """Supported camera types."""
 
@@ -24,6 +43,7 @@ class CameraType(Enum):
     DJI_POCKET3 = "DJIPocket3"
     IPHONE_11PRO = "iPhone11Pro"
     INSTA360 = "Insta360"
+    INSTA360_ULTRA_GO = "Insta360UltraGo"
     UNKNOWN = "Unknown"
 
 
@@ -72,6 +92,15 @@ def detect_camera_type(volume_path: Path) -> CameraType:
     # Check DCIM folder for other cameras
     dcim_path = volume_path / "DCIM"
     if dcim_path.exists():
+        # Insta360 Ultra Go: VID_*.mp4 and LRV_*.lrv files in DCIM/Camera01
+        camera01_path = dcim_path / "Camera01"
+        if camera01_path.exists():
+            vid_files = list(camera01_path.glob("VID_*.mp4")) + list(camera01_path.glob("VID_*.MP4"))
+            lrv_files = list(camera01_path.glob("LRV_*.lrv")) + list(camera01_path.glob("LRV_*.LRV"))
+            if vid_files or lrv_files:
+                logger.info(f"Detected Insta360 Ultra Go camera at {volume_path}")
+                return CameraType.INSTA360_ULTRA_GO
+
         # Insta360: .insv, .insp files
         for ext in [".insv", ".INSV", ".insp", ".INSP"]:
             if list(dcim_path.rglob(f"*{ext}")):
@@ -135,7 +164,7 @@ def get_video_files(volume_path: Path, camera_type: CameraType) -> list[VideoFil
     search_path: Path = volume_path
 
     if camera_type == CameraType.SONY_A7C:
-        search_path = volume_path / "PRIVATE" / "M4ROOT"
+        search_path = volume_path / "PRIVATE" / "M4ROOT" / "CLIP"
         extensions = [".MP4", ".mp4", ".MTS", ".mts"]
     elif camera_type == CameraType.DJI_POCKET3:
         search_path = volume_path / "DCIM"
@@ -146,6 +175,9 @@ def get_video_files(volume_path: Path, camera_type: CameraType) -> list[VideoFil
     elif camera_type == CameraType.INSTA360:
         search_path = volume_path / "DCIM"
         extensions = [".insv", ".INSV", ".insp", ".INSP"]
+    elif camera_type == CameraType.INSTA360_ULTRA_GO:
+        search_path = volume_path / "DCIM" / "Camera01"
+        extensions = [".mp4", ".MP4"]  # Only get VID_*.mp4 files, skip LRV files
     else:
         # Unknown camera - search entire volume
         extensions = [".MP4", ".mp4", ".MOV", ".mov", ".MTS", ".mts"]
@@ -192,18 +224,107 @@ def create_destination_structure(
     Returns:
         Path to the camera-specific destination directory.
     """
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    project_folder = f"{date_str}_{project_name}"
     camera_folder = camera_type.value
 
-    dest_path = base_path / project_folder / camera_folder
-    cache_path = base_path / project_folder / ".cache"
+    dest_path = base_path / project_name/ camera_folder
 
     dest_path.mkdir(parents=True, exist_ok=True)
-    cache_path.mkdir(parents=True, exist_ok=True)
+
+    # Clean up any leftover temporary files from previous interrupted copies
+    cleanup_temp_files(dest_path)
 
     logger.info(f"Created destination structure at {dest_path}")
     return dest_path
+
+
+def cleanup_temp_files(directory: Path) -> None:
+    """Remove any leftover .tmp files from interrupted copies.
+    
+    Args:
+        directory: Directory to clean up.
+    """
+    tmp_files = list(directory.glob(".*.tmp"))
+    if tmp_files:
+        logger.info(f"Cleaning up {len(tmp_files)} temporary file(s) from previous run...")
+        for tmp_file in tmp_files:
+            try:
+                tmp_file.unlink()
+                logger.debug(f"Removed temporary file: {tmp_file.name}")
+            except Exception as e:
+                logger.warning(f"Failed to remove {tmp_file.name}: {e}")
+
+
+def can_use_fast_copy(source: Path, destination: Path) -> bool:
+    """Check if fast copy methods can be used (same device/filesystem).
+    
+    Args:
+        source: Source file path.
+        destination: Destination directory path.
+    
+    Returns:
+        True if both paths are on the same device.
+    """
+    try:
+        source_dev = source.stat().st_dev
+        dest_dev = destination.stat().st_dev
+        return source_dev == dest_dev
+    except (OSError, AttributeError):
+        return False
+
+
+def try_fast_copy(source: Path, destination: Path) -> bool:
+    """Attempt fast copy using system utilities.
+    
+    Tries in order:
+    1. macOS clonefile (APFS clone - instant, CoW)
+    2. cp command (may use CoW on supported filesystems)
+    
+    Args:
+        source: Source file path.
+        destination: Destination file path.
+    
+    Returns:
+        True if fast copy succeeded, False to fall back to Python copy.
+    """
+    # Only try fast copy on macOS for now
+    if platform.system() != "Darwin":
+        return False
+    
+    # Try clonefile first (APFS copy-on-write clone)
+    try:
+        # Use clonefile via ctypes (macOS 10.12+)
+        import ctypes
+        libc = ctypes.CDLL(None)
+        clonefile = libc.clonefile
+        clonefile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+        clonefile.restype = ctypes.c_int
+        
+        result = clonefile(
+            str(source).encode('utf-8'),
+            str(destination).encode('utf-8'),
+            0  # flags
+        )
+        
+        if result == 0:
+            logger.debug(f"Used clonefile (instant CoW clone) for {source.name}")
+            return True
+    except Exception as e:
+        logger.debug(f"clonefile not available or failed: {e}")
+    
+    # Try cp command with -c flag (clone if possible, copy otherwise)
+    try:
+        result = subprocess.run(
+            ['cp', '-c', str(source), str(destination)],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            logger.debug(f"Used cp -c for {source.name}")
+            return True
+    except Exception as e:
+        logger.debug(f"cp command failed: {e}")
+    
+    return False
 
 
 def copy_file_with_progress(
@@ -212,7 +333,12 @@ def copy_file_with_progress(
     progress_callback: Callable[[int, int], None] | None = None,
     chunk_size: int = 1024 * 1024,  # 1MB chunks
 ) -> Path:
-    """Copy a file with progress reporting.
+    """Copy a file with progress reporting using atomic write.
+
+    Copies to a temporary file first, then atomically renames to final destination.
+    This prevents partial files from appearing as complete if interrupted.
+    
+    Attempts fast copy methods (clonefile/cp -c) first for same-device transfers.
 
     Args:
         source: Source file path.
@@ -228,21 +354,51 @@ def copy_file_with_progress(
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(source, "rb") as src, open(destination, "wb") as dst:
-        while True:
-            chunk = src.read(chunk_size)
-            if not chunk:
-                break
-            dst.write(chunk)
-            bytes_copied += len(chunk)
-            if progress_callback:
-                progress_callback(bytes_copied, total_size)
+    # Copy to temporary file with .tmp extension
+    temp_destination = destination.parent / f".{destination.name}.tmp"
 
-    # Copy metadata (timestamps, etc.)
-    shutil.copystat(source, destination)
+    try:
+        # Try fast copy first if on same device
+        if can_use_fast_copy(source, destination.parent):
+            logger.debug(f"Attempting fast copy for {source.name}")
+            if try_fast_copy(source, temp_destination):
+                # Fast copy succeeded - report 100% progress
+                if progress_callback:
+                    progress_callback(total_size, total_size)
+                
+                # Copy metadata
+                shutil.copystat(source, temp_destination)
+                
+                # Atomic rename
+                temp_destination.replace(destination)
+                logger.debug(f"Fast-copied {source} to {destination}")
+                return destination
+        
+        # Fall back to chunk-based copy with progress
+        with open(source, "rb") as src, open(temp_destination, "wb") as dst:
+            while True:
+                chunk = src.read(chunk_size)
+                if not chunk:
+                    break
+                dst.write(chunk)
+                bytes_copied += len(chunk)
+                if progress_callback:
+                    progress_callback(bytes_copied, total_size)
 
-    logger.debug(f"Copied {source} to {destination}")
-    return destination
+        # Copy metadata (timestamps, etc.)
+        shutil.copystat(source, temp_destination)
+
+        # Atomic rename - if interrupted before this, temp file remains
+        temp_destination.replace(destination)
+
+        logger.debug(f"Copied {source} to {destination}")
+        return destination
+    except Exception as e:
+        # Clean up temp file on error
+        if temp_destination.exists():
+            temp_destination.unlink()
+            logger.debug(f"Cleaned up temporary file: {temp_destination}")
+        raise
 
 
 def verify_copy(source: Path, destination: Path) -> bool:
@@ -310,8 +466,31 @@ def ingest_volume(
             progress_callback(video_file.filename, i + 1, len(video_files))
 
         dest_file = dest_path / video_file.filename
+        file_size_str = format_file_size(video_file.file_size)
+        
+        # Check if file already exists and is valid
+        if dest_file.exists():
+            dest_stat = dest_file.stat()
+            source_stat = video_file.source_path.stat()
+            
+            # Quick validation: size and modification time must match
+            if dest_stat.st_size == video_file.file_size and dest_stat.st_mtime >= source_stat.st_mtime:
+                logger.info(f"Skipping {video_file.filename} ({file_size_str}) - already copied")
+                video_file.destination_path = dest_file
+                # Note: checksum will be None for skipped files to save time
+                continue
+            elif dest_stat.st_size == video_file.file_size:
+                # Size matches but mtime doesn't - source may be newer, re-copy
+                logger.warning(f"File exists but may be outdated (mtime mismatch), re-copying: {video_file.filename}")
+                dest_file.unlink()
+            else:
+                logger.warning(f"File exists but size mismatch (expected {file_size_str}, got {format_file_size(dest_stat.st_size)}), re-copying: {video_file.filename}")
+                dest_file.unlink()  # Remove incomplete file
+        
+        logger.info(f"Copying {video_file.filename} ({file_size_str})...")
         copy_file_with_progress(video_file.source_path, dest_file)
 
+        # Only verify checksum for freshly copied files
         if verify_copy(video_file.source_path, dest_file):
             video_file.destination_path = dest_file
             video_file.checksum = calculate_sha256(dest_file)

@@ -191,3 +191,20 @@ def is_camera_volume(volume_path: Path) -> bool:
 
     camera_type = detect_camera_type(volume_path)
     return camera_type != CameraType.UNKNOWN
+
+
+def find_camera_volumes() -> list[Path]:
+    """Find all currently mounted camera volumes.
+
+    Returns:
+        List of camera volume paths.
+    """
+    volumes = list_current_volumes()
+    camera_volumes = []
+
+    for volume in volumes:
+        if is_camera_volume(volume):
+            camera_volumes.append(volume)
+            logger.info(f"Found camera volume: {volume}")
+
+    return camera_volumes

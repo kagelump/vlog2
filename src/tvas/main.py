@@ -13,18 +13,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from tvas.analysis import ClipDecision, analyze_clips_batch, DEFAULT_VLM_MODEL
+from tvas.analysis import analyze_clips_batch, DEFAULT_VLM_MODEL
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
-from tvas.proxy import ProxyConfig, ProxyType, generate_proxies_batch
-from tvas.review_ui import (
-    ClipReviewItem,
-    UserDecision,
-    check_toga_available,
-    create_review_items_from_analysis,
-    run_review_ui,
-)
+from tvas.proxy import generate_proxies_batch
 from tvas.timeline import TimelineConfig, create_timeline_from_analysis, export_analysis_json
-from tvas.watcher import VolumeWatcher, check_watchdog_available, is_camera_volume
+from tvas.watcher import VolumeWatcher, check_watchdog_available, find_camera_volumes, is_camera_volume
 
 # Configure logging
 logging.basicConfig(
@@ -39,7 +32,8 @@ class TVASApp:
 
     def __init__(
         self,
-        vlog_base_path: Path | None = None,
+        archival_path: Path | None = None,
+        proxy_path: Path | None = None,
         use_vlm: bool = True,
         vlm_model: str = DEFAULT_VLM_MODEL,
         auto_approve: bool = False,
@@ -47,17 +41,130 @@ class TVASApp:
         """Initialize the TVAS application.
 
         Args:
-            vlog_base_path: Base path for vlog storage (default: ~/Movies/Vlog).
+            archival_path: Path for archival storage (SSD). Auto-detects /Volumes/ACASIS if None.
+            proxy_path: Path for local proxy storage (default: ~/Movies/Vlog).
             use_vlm: Whether to use VLM for analysis.
             vlm_model: mlx-vlm model name for VLM.
             auto_approve: Auto-approve all AI decisions without UI.
         """
-        self.vlog_base_path = vlog_base_path or Path.home() / "Movies" / "Vlog"
+        # Auto-detect ACASIS volume for archival
+        if archival_path is None:
+            acasis_path = Path("/Volumes/Acasis")
+            if acasis_path.exists():
+                self.archival_path = acasis_path
+                logger.info(f"Auto-detected archival storage: {acasis_path}")
+            else:
+                self.archival_path = None
+                logger.info("No archival storage found - will skip file copying")
+        else:
+            self.archival_path = archival_path
+        
+        self.proxy_path = proxy_path or Path.home() / "Movies" / "Vlog"
         self.use_vlm = use_vlm
         self.vlm_model = vlm_model
         self.auto_approve = auto_approve
         self.watcher: VolumeWatcher | None = None
         self._running = False
+
+    def _process_pipeline(
+        self,
+        source_files: list[Path],
+        project_name: str,
+    ) -> dict[str, Any]:
+        """Run the processing pipeline on a list of source files.
+
+        Args:
+            source_files: List of video file paths to process.
+            project_name: Project name for organization.
+
+        Returns:
+            Dictionary with processing results.
+        """
+        results: dict[str, Any] = {
+            "success": False,
+            "files_processed": len(source_files),
+            "clips_analyzed": 0,
+            "timeline_path": None,
+            "errors": [],
+        }
+
+        if not source_files:
+            results["errors"].append("No files to process")
+            return results
+
+        proxy_dir = self.proxy_path / project_name / "proxy"
+
+        # Stage 2: Generate edit proxies
+        logger.info("Stage 2: Generating edit proxies...")
+        edit_proxy_results = []
+        try:
+            edit_proxy_results = generate_proxies_batch(
+                source_files,
+                proxy_dir,
+            )
+            successful_edit_proxies = [r for r in edit_proxy_results if r.success]
+            logger.info(f"Generated {len(successful_edit_proxies)}/{len(edit_proxy_results)} edit proxies")
+        except Exception as e:
+            results["errors"].append(f"Edit proxy generation failed: {e}")
+            logger.error(f"Edit proxy generation failed: {e}")
+
+        # Stage 3: AI Analysis (uses edit proxies)
+        logger.info("Stage 3: Analyzing clips...")
+        clips_to_analyze: list[tuple[Path, Path | None]] = [
+            (r.source_path, r.proxy_path) for r in edit_proxy_results if r.success and r.proxy_path
+        ]
+
+        # Add any existing proxies in the directory that weren't just generated/processed
+        # This allows for cumulative processing/export
+        if proxy_dir.exists():
+            current_proxies = {p for _, p in clips_to_analyze if p}
+            for proxy_file in proxy_dir.glob("*.mp4"):
+                if proxy_file not in current_proxies:
+                    logger.info(f"Found existing proxy: {proxy_file.name}")
+                    # For existing proxies, we use the proxy path as source if we can't determine the original
+                    clips_to_analyze.append((proxy_file, proxy_file))
+        try:
+            analyses = analyze_clips_batch(
+                clips_to_analyze,
+                use_vlm=self.use_vlm,
+                model_name=self.vlm_model,
+            )
+            results["clips_analyzed"] = len(analyses)
+
+            # Export analysis for debugging
+            analysis_json = self.proxy_path / project_name / "analysis.json"
+            export_analysis_json(analyses, analysis_json)
+            logger.info(f"Analysis exported to {analysis_json}")
+        except Exception as e:
+            results["errors"].append(f"Analysis failed: {e}")
+            logger.error(f"Analysis failed: {e}")
+            raise e
+
+        # Stage 4: Generate Timeline (user review happens in DaVinci Resolve)
+        logger.info("Stage 4: Generating timeline...")
+        timeline_path = (
+            self.proxy_path
+            / project_name
+            / f"{project_name}_timeline.otio"
+        )
+
+        try:
+            result_path = create_timeline_from_analysis(
+                analyses,
+                timeline_path,
+                TimelineConfig(name=project_name),
+            )
+            if result_path:
+                results["timeline_path"] = str(result_path)
+                results["success"] = True
+                logger.info(f"Timeline created: {result_path}")
+            else:
+                results["errors"].append("Timeline generation returned None")
+        except Exception as e:
+            results["errors"].append(f"Timeline generation failed: {e}")
+            logger.error(f"Timeline generation failed: {e}")
+
+        return results
 
     def process_volume(
         self,
@@ -95,128 +202,96 @@ class TVASApp:
         if project_name is None:
             project_name = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Stage 1: Ingest files
-        logger.info("Stage 1: Ingesting files...")
-        try:
-            session = ingest_volume(
-                volume_path,
-                self.vlog_base_path,
-                project_name,
-                progress_callback=lambda name, i, total: logger.info(
-                    f"Copying {i}/{total}: {name}"
-                ),
-            )
-            results["files_processed"] = len(session.files)
-            logger.info(f"Ingested {len(session.files)} files")
-        except Exception as e:
-            results["errors"].append(f"Ingestion failed: {e}")
-            logger.error(f"Ingestion failed: {e}")
-            return results
+        # Stage 1: Ingest files (optional - skip if no archival path)
+        source_files = []
+        if self.archival_path:
+            logger.info("Stage 1: Ingesting files to archival storage...")
+            try:
+                session = ingest_volume(
+                    volume_path,
+                    self.archival_path,
+                    project_name,
+                    progress_callback=lambda name, i, total: logger.info(
+                        f"Copying {i}/{total}: {name}"
+                    ),
+                )
+                logger.info(f"Ingested {len(session.files)} files")
+                source_files = [f.destination_path for f in session.files if f.destination_path]
+            except Exception as e:
+                results["errors"].append(f"Ingestion failed: {e}")
+                logger.error(f"Ingestion failed: {e}")
+                return results
 
-        if not session.files:
-            results["errors"].append("No files found to process")
-            return results
+            if not session.files:
+                results["errors"].append("No files found to process")
+                return results
+        else:
+            # No archival - work directly from SD card
+            logger.info("Stage 1: Skipping archival copy (no archival path)...")
+            from tvas.ingestion import get_video_files
+            video_files = get_video_files(volume_path, camera_type)
+            source_files = [f.source_path for f in video_files]
+            logger.info(f"Found {len(source_files)} files on SD card")
+            
+            if not source_files:
+                results["errors"].append("No files found to process")
+                return results
 
-        # Stage 2: Generate AI proxies
-        logger.info("Stage 2: Generating AI proxies...")
-        source_files = [f.destination_path for f in session.files if f.destination_path]
-
-        # Determine cache directory
-        cache_dir = self.vlog_base_path / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}" / ".cache"
-
-        try:
-            proxy_results = generate_proxies_batch(
-                source_files,
-                cache_dir,
-                ProxyType.AI_PROXY,
-                ProxyConfig(use_hardware_accel=True),
-            )
-            successful_proxies = [r for r in proxy_results if r.success]
-            logger.info(f"Generated {len(successful_proxies)}/{len(proxy_results)} proxies")
-        except Exception as e:
-            results["errors"].append(f"Proxy generation failed: {e}")
-            logger.error(f"Proxy generation failed: {e}")
-            # Continue without proxies - will analyze originals
-            proxy_results = []
-
-        # Create clips list for analysis
-        clips_to_analyze = []
-        for source_file in source_files:
-            # Find corresponding proxy
-            proxy_path = None
-            for pr in proxy_results:
-                if pr.success and pr.source_path == source_file:
-                    proxy_path = pr.proxy_path
-                    break
-            clips_to_analyze.append((source_file, proxy_path))
-
-        # Stage 3: AI Analysis
-        logger.info("Stage 3: Analyzing clips...")
-        try:
-            analyses = analyze_clips_batch(
-                clips_to_analyze,
-                use_vlm=self.use_vlm,
-                model_name=self.vlm_model,
-            )
-            results["clips_analyzed"] = len(analyses)
-
-            # Export analysis for debugging
-            analysis_json = cache_dir / "analysis.json"
-            export_analysis_json(analyses, analysis_json)
-            logger.info(f"Analysis exported to {analysis_json}")
-        except Exception as e:
-            results["errors"].append(f"Analysis failed: {e}")
-            logger.error(f"Analysis failed: {e}")
-            return results
-
-        # Stage 4: User Review
-        reviewed_clips = None
-        if not self.auto_approve:
-            logger.info("Stage 4: Opening review UI...")
-            if check_toga_available():
-                try:
-                    review_items = create_review_items_from_analysis(analyses)
-                    reviewed_clips = run_review_ui(review_items)
-                except Exception as e:
-                    logger.warning(f"UI failed, using auto-approve: {e}")
-                    self.auto_approve = True
-            else:
-                logger.info("Toga not available - auto-approving AI decisions")
-                self.auto_approve = True
-
-        if self.auto_approve:
-            # Create review items with auto-approve
-            review_items = create_review_items_from_analysis(analyses)
-            for item in review_items:
-                item.user_decision = UserDecision.APPROVE
-            reviewed_clips = review_items
-
-        # Stage 5: Generate Timeline
-        logger.info("Stage 5: Generating timeline...")
-        timeline_path = (
-            self.vlog_base_path
-            / f"{datetime.now().strftime('%Y-%m-%d')}_{project_name}"
-            / f"{project_name}_timeline.otio"
-        )
-
-        try:
-            result_path = create_timeline_from_analysis(
-                analyses,
-                reviewed_clips,
-                timeline_path,
-                TimelineConfig(name=project_name),
-            )
-            if result_path:
-                results["timeline_path"] = str(result_path)
-                results["success"] = True
-                logger.info(f"Timeline created: {result_path}")
-            else:
-                results["errors"].append("Timeline generation returned None")
-        except Exception as e:
-            results["errors"].append(f"Timeline generation failed: {e}")
-            logger.error(f"Timeline generation failed: {e}")
-
+        # Run the rest of the pipeline
+        pipeline_results = self._process_pipeline(source_files, project_name)
+        results.update(pipeline_results)
         return results
+
+    def process_from_archival(
+        self,
+        archival_dir: Path,
+        project_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Process files from archival storage (skip ingestion stage).
+
+        Args:
+            archival_dir: Path to the archival directory containing camera folders.
+            project_name: Optional project name (default: use directory name).
+
+        Returns:
+            Dictionary with processing results.
+        """
+        # Use directory name as project name if not provided
+        if project_name is None:
+            project_name = archival_dir.name
+
+        logger.info(f"Processing from archival directory: {archival_dir}")
+
+        # Gather all video files from camera subdirectories
+        source_files = []
+        camera_dirs = [d for d in archival_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
+        
+        if not camera_dirs:
+            return {
+                "archival_dir": str(archival_dir),
+                "success": False,
+                "errors": [f"No camera directories found in {archival_dir}"],
+            }
+
+        # Collect video files from all camera folders
+        video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mts', '.MTS', '.insv', '.INSV', '.insp', '.INSP'}
+        for camera_dir in camera_dirs:
+            logger.info(f"Scanning {camera_dir.name}...")
+            for video_file in camera_dir.iterdir():
+                if video_file.is_file() and video_file.suffix in video_extensions:
+                    source_files.append(video_file)
+        
+        if not source_files:
+            return {
+                "archival_dir": str(archival_dir),
+                "success": False,
+                "errors": ["No video files found in archival directory"],
+            }
+
+        logger.info(f"Found {len(source_files)} video files in archival storage")
+
+        # Run the pipeline
+        return self._process_pipeline(source_files, project_name)
 
     def _on_volume_added(self, volume_path: Path):
         """Handle volume mount event."""
@@ -292,9 +367,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  tvas                      Auto-detect camera SD card and ACASIS archival storage
   tvas --watch              Start watching for SD cards
   tvas --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
-  tvas --volume /Volumes/SONY_A7C --auto-approve
+  tvas --archival-path /Volumes/MySSD --proxy-path ~/Videos
         """,
     )
 
@@ -307,7 +383,7 @@ Examples:
     parser.add_argument(
         "--volume",
         type=Path,
-        help="Process a specific volume/SD card",
+        help="Process a specific volume/SD card (auto-detects if not specified)",
     )
 
     parser.add_argument(
@@ -317,10 +393,16 @@ Examples:
     )
 
     parser.add_argument(
-        "--base-path",
+        "--archival-path",
+        type=Path,
+        help="Path for archival storage (auto-detects /Volumes/Acasis if not specified)",
+    )
+
+    parser.add_argument(
+        "--proxy-path",
         type=Path,
         default=Path.home() / "Movies" / "Vlog",
-        help="Base path for vlog storage (default: ~/Movies/Vlog)",
+        help="Path for local proxy/timeline storage (default: ~/Movies/Vlog)",
     )
 
     parser.add_argument(
@@ -355,7 +437,8 @@ Examples:
         logging.getLogger().setLevel(logging.DEBUG)
 
     app = TVASApp(
-        vlog_base_path=args.base_path,
+        archival_path=args.archival_path,
+        proxy_path=args.proxy_path,
         use_vlm=not args.no_vlm,
         vlm_model=args.model,
         auto_approve=args.auto_approve,
@@ -381,8 +464,67 @@ Examples:
                 logger.error(f"  - {error}")
             sys.exit(1)
     else:
-        parser.print_help()
-        sys.exit(0)
+        # Auto-detect camera volumes or use archival path
+        logger.info("No volume specified - searching for camera SD cards...")
+        camera_volumes = find_camera_volumes()
+        
+        if not camera_volumes:
+            # No SD card found - check if we can process from archival path
+            if app.archival_path and app.archival_path.exists():
+                logger.info(f"No SD card found, but archival path exists: {app.archival_path}")
+                logger.info("Checking for previously copied files to process...")
+                
+                # Look for the most recent project directory in archival path
+                project_dirs = sorted(
+                    [d for d in app.archival_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
+                    key=lambda x: x.stat().st_mtime,
+                    reverse=True
+                )
+                
+                if project_dirs:
+                    latest_project = project_dirs[0]
+                    logger.info(f"Found recent project directory: {latest_project.name}")
+                    
+                    # Process from archival path (files already copied)
+                    results = app.process_from_archival(latest_project, args.project)
+                    
+                    if results["success"]:
+                        logger.info("Processing complete!")
+                        logger.info(f"Files processed: {results['files_processed']}")
+                        logger.info(f"Clips analyzed: {results['clips_analyzed']}")
+                        logger.info(f"Timeline: {results['timeline_path']}")
+                    else:
+                        logger.error("Processing failed:")
+                        for error in results["errors"]:
+                            logger.error(f"  - {error}")
+                        sys.exit(1)
+                else:
+                    logger.error("No project directories found in archival path")
+                    logger.error("Please insert an SD card or specify --volume")
+                    sys.exit(1)
+            else:
+                logger.error("No camera volumes found and no archival path available")
+                logger.error("Please insert an SD card or specify --volume")
+                parser.print_help()
+                sys.exit(1)
+        elif len(camera_volumes) == 1:
+            logger.info(f"Found camera volume: {camera_volumes[0]}")
+            results = app.process_volume(camera_volumes[0], args.project)
+            
+            if results["success"]:
+                logger.info("Processing complete!")
+                logger.info(f"Files processed: {results['files_processed']}")
+                logger.info(f"Clips analyzed: {results['clips_analyzed']}")
+                logger.info(f"Timeline: {results['timeline_path']}")
+            else:
+                logger.error("Processing failed:")
+                for error in results["errors"]:
+                    logger.error(f"  - {error}")
+                sys.exit(1)
+        else:
+            logger.error(f"Multiple camera volumes found: {[str(v) for v in camera_volumes]}")
+            logger.error("Please specify which volume to process with --volume")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -30,28 +30,23 @@
        ▼
 ┌─────────────────────────────────────┐
 │  Stage 3: AI Analysis               │
-│  Tool: Qwen3 VL (8B) via Ollama     │
-│  Process: Frame sampling + scoring  │
+│  Tool: Qwen3 VL (8B) via mlx-vlm    │
+│  Process: Video analysis, naming,   │
+│           trim point detection      │
 └──────┬──────────────────────────────┘
        │
        ▼
 ┌─────────────────────────────────────┐
-│  Stage 4: User Review               │
-│  Tool: Toga (Native macOS UI)       │
-│  Action: Approve/Override AI        │
-└──────┬──────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────┐
-│  Stage 5: Timeline Generation       │
+│  Stage 4: Timeline Generation       │
 │  Tool: OpenTimelineIO (Python)      │
-│  Output: . otio file                 │
+│  Output: .otio file                 │
 └──────┬──────────────────────────────┘
        │
        ▼
 ┌─────────────────────────────────────┐
 │  DaVinci Resolve                    │
-│  Import Timeline                    │
+│  Import Timeline & Edit             │
+│  (Review, adjust trims, finalize)   │
 └─────────────────────────────────────┘
 ```
 
@@ -180,47 +175,12 @@
 
 ---
 
-### **Stage 4: User Review Interface**
-
-#### **Chosen Solution: Toga (BeeWare)**
-**Why:**
-- **Native macOS widgets:** Uses NSButton, NSImageView, etc. under the hood
-- **Pythonic API:** Easiest to learn and maintain
-- **Modern look and feel:** Automatic dark mode support
-- **Active development:** Good 2025 updates and community support
-- **Cross-platform:** Could expand to other platforms later if needed
-
-**Alternatives Rejected:**
-- ❌ **Flask Web UI:** Not native, requires browser, more complex deployment
-- ❌ **PyQt6/PySide6:** Not native macOS widgets, larger dependency footprint
-- ❌ **Tkinter:** Ugly on macOS, dated appearance
-- ❌ **PyObjC:** Too steep learning curve for this use case
-
-**UI Features:**
-- **Thumbnail gallery:** Grid view of all analyzed clips
-- **Color-coded borders:** Red (rejected), Yellow (uncertain), Green (approved)
-- **Metadata display:** Camera source, duration, AI confidence score
-- **Quick actions:** Approve, Reject, Keep Original decision
-- **Filtering:** View by camera, confidence level, or decision type
-- **Progress indicator:** Shows processing status during AI analysis
-
-**User Workflow:**
-1. Script processes clips in background
-2. Notification appears when analysis complete
-3. User opens Toga review window at convenience
-4. Reviews thumbnails with color-coded AI decisions
-5. Overrides any incorrect decisions with single click
-6. Clicks "Generate Timeline" when satisfied
-7. Returns to DaVinci Resolve to import timeline
-
----
-
-### **Stage 5: Timeline Generation**
+### **Stage 4: Timeline Generation**
 
 #### **Chosen Solution: OpenTimelineIO (Python Library)**
 **Why:**
 - **DaVinci Resolve native support:** Imports cleanly in both Free and Studio
-- **Rich metadata:** Can embed markers, colors, notes on clips
+- **Rich metadata:** Can embed clip names, trim points, notes on clips
 - **Pythonic:** Clean API for programmatic timeline construction
 - **Active development:** Better maintained than FCPXML exporters
 - **No Resolve dependency:** Generates timeline offline
@@ -231,17 +191,26 @@
 - ❌ **Direct Resolve API:** Requires Resolve to be open, Studio version for full API
 
 **Output Features:**
-- ✅ Clips automatically trimmed (junk removed based on AI + user decisions)
-- ✅ Yellow markers on "uncertain" clips
-- ✅ Red markers on "rejected" clips (user can review)
-- ✅ Metadata embedded (AI confidence scores, camera source)
+- ✅ AI-generated descriptive clip names (e.g., "airport_lobby_walk", "iceberg_passing")
+- ✅ Clips with suggested trim points from AI analysis
+- ✅ Metadata embedded (AI confidence scores, camera source, VLM reasoning)
 - ✅ Source timecode preserved
+- ✅ All editing/review done directly in DaVinci Resolve
 
 **DaVinci Resolve Import:**
 1. Open Resolve
 2. File → Import → Timeline → Import AAF, EDL, XML, OTIO... 
-3. Select generated `. otio` file
-4. Timeline appears with all clips pre-trimmed and marked
+3. Select generated `.otio` file
+4. Timeline appears with all clips and AI-suggested trim points
+5. Review clips, adjust trims, accept/reject as needed in Resolve
+
+**User Workflow:**
+1. Script processes clips (ingestion, proxy generation, AI analysis)
+2. Timeline automatically generated with AI suggestions
+3. User opens DaVinci Resolve
+4. Imports timeline with all clips pre-named and trim-suggested
+5. Reviews and edits directly in professional NLE environment
+6. No separate review UI needed - leverage Resolve's powerful tools
 
 ---
 

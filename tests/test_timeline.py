@@ -8,7 +8,6 @@ import pytest
 from tvas.timeline import (
     TimelineClip,
     TimelineConfig,
-    check_otio_available,
     export_analysis_json,
 )
 
@@ -21,23 +20,17 @@ class TestTimelineConfig:
         config = TimelineConfig()
 
         assert config.name == "TVAS Timeline"
-        assert config.framerate == 24.0
-        assert config.include_rejected is True
-        assert config.add_markers is True
+        assert config.framerate == 60.0
 
     def test_custom_config(self):
         """Test custom configuration values."""
         config = TimelineConfig(
             name="Tokyo Vlog",
             framerate=30.0,
-            include_rejected=False,
-            add_markers=False,
         )
 
         assert config.name == "Tokyo Vlog"
         assert config.framerate == 30.0
-        assert config.include_rejected is False
-        assert config.add_markers is False
 
 
 class TestTimelineClip:
@@ -53,8 +46,6 @@ class TestTimelineClip:
 
         assert clip.in_point_seconds == 0.0
         assert clip.out_point_seconds is None
-        assert clip.is_rejected is False
-        assert clip.is_uncertain is False
         assert clip.confidence == "high"
         assert clip.camera_source == ""
         assert clip.ai_notes == ""
@@ -67,16 +58,13 @@ class TestTimelineClip:
             duration_seconds=10.0,
             in_point_seconds=2.0,
             out_point_seconds=8.0,
-            is_rejected=False,
-            is_uncertain=True,
             confidence="medium",
             camera_source="DJIPocket3",
-            ai_notes="Possible blur at start",
+            ai_notes="Trim suggestion at start",
         )
 
         assert clip.in_point_seconds == 2.0
         assert clip.out_point_seconds == 8.0
-        assert clip.is_uncertain is True
         assert clip.confidence == "medium"
         assert clip.camera_source == "DJIPocket3"
 
@@ -112,11 +100,6 @@ class TestExportAnalysisJson:
         assert output_path.exists()
 
 
-class TestOtioAvailability:
-    """Tests for OTIO availability check."""
-
-    def test_check_otio_available(self):
-        """Test OTIO availability check."""
-        # This just tests the function doesn't crash
-        result = check_otio_available()
-        assert isinstance(result, bool)
+# Note: Integration tests for create_timeline and create_timeline_from_analysis
+# would require actual video files and ClipAnalysis objects, so they are better
+# suited for integration/E2E test suites rather than unit tests.
