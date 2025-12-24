@@ -10,36 +10,9 @@ import pytest
 from tvas.tprs import (
     DEFAULT_VLM_MODEL,
     PhotoAnalysis,
-    check_mlx_vlm_available,
     find_jpeg_photos,
     generate_xmp_sidecar,
 )
-
-
-class TestMlxVlmAvailability:
-    """Tests for mlx-vlm availability check."""
-
-    def test_check_mlx_vlm_available_present(self):
-        """Test when mlx-vlm is available."""
-        import tvas.tprs
-
-        original = tvas.tprs.MLX_VLM_AVAILABLE
-        tvas.tprs.MLX_VLM_AVAILABLE = True
-        try:
-            assert tvas.tprs.check_mlx_vlm_available() is True
-        finally:
-            tvas.tprs.MLX_VLM_AVAILABLE = original
-
-    def test_check_mlx_vlm_available_missing(self):
-        """Test when mlx-vlm is not available."""
-        import tvas.tprs
-
-        original = tvas.tprs.MLX_VLM_AVAILABLE
-        tvas.tprs.MLX_VLM_AVAILABLE = False
-        try:
-            assert tvas.tprs.check_mlx_vlm_available() is False
-        finally:
-            tvas.tprs.MLX_VLM_AVAILABLE = original
 
 
 class TestFindJpegPhotos:

@@ -13,22 +13,13 @@ from xml.etree import ElementTree as ET
 
 logger = logging.getLogger(__name__)
 
-# mlx-vlm is optional - will gracefully degrade if not available
-try:
-    from mlx_vlm import load, generate
-    from mlx_vlm.prompt_utils import apply_chat_template
-    from mlx_vlm.utils import load_config
-
-    MLX_VLM_AVAILABLE = True
-except ImportError:
-    MLX_VLM_AVAILABLE = False
-    load = None
-    generate = None
-    apply_chat_template = None
-    load_config = None
+# mlx-vlm is required
+from mlx_vlm import load, generate
+from mlx_vlm.prompt_utils import apply_chat_template
+from mlx_vlm.utils import load_config
 
 # Default model for mlx-vlm
-DEFAULT_VLM_MODEL = "mlx-community/Qwen2-VL-7B-Instruct-4bit"
+DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
 
 
 @dataclass
@@ -40,15 +31,6 @@ class PhotoAnalysis:
     keywords: list[str]  # 5 keywords
     description: str  # Caption
     raw_response: str | None = None
-
-
-def check_mlx_vlm_available() -> bool:
-    """Check if mlx-vlm is available on the system.
-
-    Returns:
-        True if mlx-vlm is available and can be used.
-    """
-    return MLX_VLM_AVAILABLE
 
 
 def find_jpeg_photos(directory: Path) -> list[Path]:
@@ -87,15 +69,6 @@ def analyze_photo_vlm(
     Returns:
         PhotoAnalysis with rating, keywords, and description.
     """
-    if not MLX_VLM_AVAILABLE:
-        logger.warning("mlx-vlm not available - using default values")
-        return PhotoAnalysis(
-            photo_path=photo_path,
-            rating=3,
-            keywords=["photo", "image", "unprocessed", "default", "placeholder"],
-            description="Photo analysis unavailable - mlx-vlm not installed",
-        )
-
     # Load model
     try:
         logger.info(f"Loading mlx-vlm model: {model_name}")

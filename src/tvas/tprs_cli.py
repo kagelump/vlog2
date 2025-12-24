@@ -11,7 +11,6 @@ from pathlib import Path
 
 from tvas.tprs import (
     DEFAULT_VLM_MODEL,
-    check_mlx_vlm_available,
     find_jpeg_photos,
     process_photos_batch,
 )
@@ -95,12 +94,6 @@ Examples:
         for photo in photos:
             logger.info(f"  {photo}")
         sys.exit(0)
-
-    # Check if mlx-vlm is available (only needed for actual processing)
-    if not check_mlx_vlm_available():
-        logger.error("mlx-vlm is not available. Please install it:")
-        logger.error("  pip install mlx-vlm")
-        sys.exit(1)
 
     # Create output directory if specified
     if args.output:
