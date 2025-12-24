@@ -12,7 +12,7 @@ import tempfile
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Iterator
+from typing import Optional, Iterator, Callable, Any
 from xml.etree import ElementTree as ET
 
 from PIL import Image, ExifTags
@@ -652,6 +652,7 @@ def process_photos_batch(
     photos: list[Path],
     model_name: str = DEFAULT_VLM_MODEL,
     output_dir: Optional[Path] = None,
+    status_callback: Optional[Callable[[int, int, Optional[Path], Optional[PhotoAnalysis]], None]] = None,
 ) -> list[tuple[PhotoAnalysis, Path]]:
     """Process a batch of photos and generate XMP sidecars.
 
@@ -659,6 +660,7 @@ def process_photos_batch(
         photos: List of photo paths to process.
         model_name: mlx-vlm model name.
         output_dir: Optional output directory for XMP files.
+        status_callback: Callback for progress updates (processed, total, current_photo, last_analysis).
 
     Returns:
         List of (PhotoAnalysis, xmp_path) tuples.
@@ -689,6 +691,12 @@ def process_photos_batch(
         else:
             photos_to_process.append(photo_path)
 
+    total_photos = len(photos)
+    processed_count = len(results)
+
+    if status_callback:
+        status_callback(processed_count, total_photos, None, None)
+
     if not photos_to_process:
         logger.info("All photos have existing sidecars. No processing needed.")
         return results
@@ -710,10 +718,24 @@ def process_photos_batch(
         
         burst_analyses = []
         for photo_path in burst:
+            # Notify start
+            if status_callback:
+                status_callback(processed_count, total_photos, photo_path, None)
+
             # Analyze photo
             analysis = analyze_photo_vlm(photo_path, model, processor, config)
+            
+            processed_count += 1
+            
             if analysis:
                 burst_analyses.append(analysis)
+                # Notify end with analysis
+                if status_callback:
+                    status_callback(processed_count, total_photos, photo_path, analysis)
+            else:
+                # Notify end (failed)
+                if status_callback:
+                    status_callback(processed_count, total_photos, photo_path, None)
 
         if not burst_analyses:
             continue

@@ -69,6 +69,12 @@ Examples:
         help="Find photos but don't process them",
     )
 
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Show progress in a GUI window",
+    )
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -78,6 +84,12 @@ Examples:
     if not args.directory.exists():
         logger.error(f"Directory does not exist: {args.directory}")
         sys.exit(1)
+
+    if args.gui:
+        from tvas.tprs_ui import main as ui_main
+        app = ui_main(args.directory, args.output, args.model)
+        app.main_loop()
+        sys.exit(0)
 
     # Find photos
     logger.info(f"Scanning for JPEG photos in {args.directory}")
