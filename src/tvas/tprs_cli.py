@@ -112,11 +112,34 @@ Examples:
 
         # Summary
         logger.info("\nSummary:")
-        for analysis, xmp_path in results:
-            logger.info(f"  {analysis.photo_path.name}:")
-            logger.info(f"    Rating: {analysis.rating} stars")
-            logger.info(f"    Keywords: {', '.join(analysis.keywords)}")
-            logger.info(f"    XMP: {xmp_path.name}")
+        
+        total_photos = len(results)
+        rating_counts = {i: 0 for i in range(1, 6)}
+        keyword_counts = {}
+
+        for analysis, _ in results:
+            # Count ratings
+            r = analysis.rating
+            if r in rating_counts:
+                rating_counts[r] += 1
+            
+            # Count keywords
+            for k in analysis.keywords:
+                k_lower = k.lower()
+                keyword_counts[k_lower] = keyword_counts.get(k_lower, 0) + 1
+
+        logger.info(f"Total Photos Analyzed: {total_photos}")
+        
+        logger.info("\nRating Distribution:")
+        for rating in range(1, 6):
+            count = rating_counts.get(rating, 0)
+            percentage = (count / total_photos * 100) if total_photos > 0 else 0
+            logger.info(f"  {rating} Stars: {count} ({percentage:.1f}%)")
+
+        logger.info("\nTop 10 Keywords:")
+        sorted_keywords = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        for keyword, count in sorted_keywords:
+            logger.info(f"  {keyword}: {count}")
 
     except Exception as e:
         logger.error(f"Processing failed: {e}")

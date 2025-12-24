@@ -9,12 +9,13 @@ import json
 import logging
 import os
 import tempfile
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from xml.etree import ElementTree as ET
 
-from PIL import Image
+from PIL import Image, ExifTags
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,58 @@ def find_jpeg_photos(directory: Path) -> list[Path]:
 
     logger.info(f"Found {len(photos)} JPEG photos in {directory}")
     return sorted(photos)
+
+
+def get_capture_time(image_path: Path) -> datetime:
+    """Get capture time from EXIF data."""
+    try:
+        with Image.open(image_path) as img:
+            exif = img.getexif()
+            if not exif:
+                return datetime.fromtimestamp(image_path.stat().st_mtime)
+            
+            # 36867 is DateTimeOriginal, 306 is DateTime
+            date_str = exif.get(36867) or exif.get(306)
+            
+            if date_str:
+                try:
+                    return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+                except ValueError:
+                    pass
+                    
+            return datetime.fromtimestamp(image_path.stat().st_mtime)
+    except Exception:
+        return datetime.fromtimestamp(image_path.stat().st_mtime)
+
+
+def group_photos_into_bursts(photos: list[Path], threshold_seconds: float = 2.0) -> list[list[Path]]:
+    """Group photos into bursts based on capture time."""
+    if not photos:
+        return []
+        
+    # Sort by capture time
+    photos_with_time = []
+    for p in photos:
+        photos_with_time.append((p, get_capture_time(p)))
+    
+    photos_with_time.sort(key=lambda x: x[1])
+    
+    bursts = []
+    current_burst = [photos_with_time[0][0]]
+    prev_time = photos_with_time[0][1]
+    
+    for photo, time in photos_with_time[1:]:
+        if (time - prev_time).total_seconds() <= threshold_seconds:
+            current_burst.append(photo)
+        else:
+            bursts.append(current_burst)
+            current_burst = [photo]
+        prev_time = time
+            
+    if current_burst:
+        bursts.append(current_burst)
+        
+    return bursts
 
 
 def resize_image(image_path: Path, max_dimension: int = 1024) -> Optional[Path]:
@@ -369,7 +422,7 @@ def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = 
         tree.write(f, encoding="UTF-8", xml_declaration=False)
         f.write(b"\n")
 
-    logger.info(f"Generated XMP sidecar: {output_path}")
+    logger.info(f"Generated XMP sidecar: {output_path} | Rating: {analysis.rating} | Subjects: {analysis.keywords}")
     return output_path
 
 
@@ -404,6 +457,92 @@ def get_xmp_info(xmp_path: Path) -> tuple[str, list[str]]:
     except Exception as e:
         logger.warning(f"Failed to parse XMP {xmp_path}: {e}")
         return "Error", []
+
+
+def select_best_in_burst(
+    burst_analyses: list[PhotoAnalysis],
+    model,
+    processor,
+    config
+) -> PhotoAnalysis:
+    """Select the best photo from a burst using VLM comparison."""
+    # Filter for candidates (rating >= 3)
+    candidates = [a for a in burst_analyses if a.rating >= 3]
+    
+    if not candidates:
+        # If all are bad, just return the one with highest rating
+        return max(burst_analyses, key=lambda x: x.rating)
+        
+    if len(candidates) == 1:
+        return candidates[0]
+        
+    # If too many candidates, take top 4 by rating
+    candidates.sort(key=lambda x: x.rating, reverse=True)
+    candidates = candidates[:4]
+    
+    # Prepare prompt for comparison
+    image_paths = []
+    temp_files = []
+    
+    try:
+        for c in candidates:
+            # Resize for comparison to save memory and tokens
+            resized = resize_image(c.photo_path, max_dimension=512)
+            if resized:
+                image_paths.append(str(resized))
+                temp_files.append(resized)
+            else:
+                image_paths.append(str(c.photo_path))
+        
+        prompt = """Look at these photos from the same burst. Which one is the best in terms of composition, sharpness, and expression? 
+Respond with a JSON object containing the index of the best photo (0-based) and a brief reason.
+Example: {"best_index": 1, "reason": "Subject is sharpest and has best smile."}"""
+
+        formatted_prompt = apply_chat_template(
+            processor, config, prompt, num_images=len(image_paths)
+        )
+        
+        response = generate(
+            model,
+            processor,
+            formatted_prompt,
+            image_paths,
+            verbose=False,
+            max_tokens=100,
+        )
+        
+        if hasattr(response, "text"):
+            response_text = response.text
+        else:
+            response_text = str(response)
+            
+        # Clean JSON
+        clean_text = response_text.strip()
+        if clean_text.startswith("```json"): clean_text = clean_text[7:]
+        if clean_text.startswith("```"): clean_text = clean_text[3:]
+        if clean_text.endswith("```"): clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+        
+        try:
+            data = json.loads(clean_text)
+            best_index = int(data.get("best_index", 0))
+            if 0 <= best_index < len(candidates):
+                return candidates[best_index]
+        except Exception as e:
+            logger.warning(f"Failed to parse burst selection response: {e}")
+            
+    except Exception as e:
+        logger.error(f"Burst selection failed: {e}")
+    finally:
+        for tf in temp_files:
+            if tf.exists():
+                try:
+                    os.unlink(tf)
+                except Exception:
+                    pass
+                    
+    # Fallback to first candidate (highest rated)
+    return candidates[0]
 
 
 def process_photos_batch(
@@ -460,25 +599,46 @@ def process_photos_batch(
         logger.error(f"Failed to load model {model_name}: {e}")
         return results
 
-    for i, photo_path in enumerate(photos_to_process):
-        logger.info(f"Processing photo {i + 1}/{len(photos_to_process)}: {photo_path.name}")
+    # Group into bursts
+    bursts = group_photos_into_bursts(photos_to_process)
+    logger.info(f"Grouped {len(photos_to_process)} photos into {len(bursts)} bursts")
 
-        # Analyze photo
-        analysis = analyze_photo_vlm(photo_path, model, processor, config)
+    for i, burst in enumerate(bursts):
+        logger.info(f"Processing burst {i + 1}/{len(bursts)} ({len(burst)} photos)")
+        
+        burst_analyses = []
+        for photo_path in burst:
+            # Analyze photo
+            analysis = analyze_photo_vlm(photo_path, model, processor, config)
+            if analysis:
+                burst_analyses.append(analysis)
 
-        if analysis is None:
-            logger.warning(f"Skipping XMP generation for {photo_path.name} due to analysis failure")
+        if not burst_analyses:
             continue
 
-        # Generate XMP
-        if output_dir:
-            xmp_path = output_dir / f"{photo_path.stem}.xmp"
-        else:
-            xmp_path = None
+        # Select best in burst if more than 1 photo
+        best_photo = None
+        if len(burst_analyses) > 1:
+            best_photo = select_best_in_burst(burst_analyses, model, processor, config)
+            
+            # Apply rating constraints
+            for analysis in burst_analyses:
+                if analysis == best_photo:
+                    analysis.keywords.append("BestInBurst")
+                else:
+                    if analysis.rating >= 5:
+                        analysis.rating = 4
+                    analysis.keywords.append("BurstDuplicate")
+        
+        # Generate XMP for all
+        for analysis in burst_analyses:
+            if output_dir:
+                xmp_path = output_dir / f"{analysis.photo_path.stem}.xmp"
+            else:
+                xmp_path = None
 
-        xmp_file = generate_xmp_sidecar(analysis, xmp_path)
-
-        results.append((analysis, xmp_file))
+            xmp_file = generate_xmp_sidecar(analysis, xmp_path)
+            results.append((analysis, xmp_file))
 
     logger.info(f"Processed {len(results)} photos")
     return results
