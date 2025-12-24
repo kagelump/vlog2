@@ -19,7 +19,7 @@ from mlx_vlm.prompt_utils import apply_chat_template
 from mlx_vlm.utils import load_config
 
 # Default model for mlx-vlm
-DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
+DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-4bit"
 
 
 @dataclass
