@@ -12,7 +12,7 @@ import tempfile
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Iterator
 from xml.etree import ElementTree as ET
 
 from PIL import Image, ExifTags
@@ -86,10 +86,89 @@ def get_capture_time(image_path: Path) -> datetime:
         return datetime.fromtimestamp(image_path.stat().st_mtime)
 
 
-def group_photos_into_bursts(photos: list[Path], threshold_seconds: float = 2.0) -> list[list[Path]]:
-    """Group photos into bursts based on capture time."""
+def are_photos_in_same_burst(
+    photo1: Path,
+    photo2: Path,
+    model,
+    processor,
+    config
+) -> bool:
+    """Use VLM to determine if two photos belong to the same burst."""
+    p1_resized = None
+    p2_resized = None
+    try:
+        # Resize for speed
+        p1_resized = resize_image(photo1, max_dimension=512)
+        p2_resized = resize_image(photo2, max_dimension=512)
+        
+        image_paths = [
+            str(p1_resized if p1_resized else photo1),
+            str(p2_resized if p2_resized else photo2)
+        ]
+        
+        prompt = """Look at these two photos. Do they belong to the same scene or burst of shots?
+They should be considered the same burst if:
+1. They show the same subject in the same location.
+2. They were taken in quick succession (which you can infer from lighting and subject position).
+3. They are visually very similar.
+
+Answer with a JSON object: {"same_burst": true} or {"same_burst": false}."""
+
+        formatted_prompt = apply_chat_template(
+            processor, config, prompt, num_images=2
+        )
+        
+        response = generate(
+            model,
+            processor,
+            formatted_prompt,
+            image_paths,
+            verbose=False,
+            max_tokens=50,
+        )
+        
+        if hasattr(response, "text"):
+            text = response.text
+        else:
+            text = str(response)
+            
+        # Clean JSON
+        clean_text = text.strip()
+        if clean_text.startswith("```json"): clean_text = clean_text[7:]
+        if clean_text.startswith("```"): clean_text = clean_text[3:]
+        if clean_text.endswith("```"): clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+        
+        data = json.loads(clean_text)
+        return bool(data.get("same_burst", False))
+        
+    except Exception as e:
+        logger.warning(f"Burst comparison failed for {photo1.name} and {photo2.name}: {e}")
+        return False
+    finally:
+        # Cleanup temp files
+        if p1_resized and p1_resized.exists():
+            try:
+                os.unlink(p1_resized)
+            except Exception:
+                pass
+        if p2_resized and p2_resized.exists():
+            try:
+                os.unlink(p2_resized)
+            except Exception:
+                pass
+
+
+def generate_bursts(
+    photos: list[Path], 
+    model,
+    processor,
+    config,
+    threshold_minutes: float = 5.0
+) -> Iterator[list[Path]]:
+    """Yield bursts of photos based on capture time and visual similarity."""
     if not photos:
-        return []
+        return
         
     # Sort by capture time
     photos_with_time = []
@@ -98,22 +177,37 @@ def group_photos_into_bursts(photos: list[Path], threshold_seconds: float = 2.0)
     
     photos_with_time.sort(key=lambda x: x[1])
     
-    bursts = []
     current_burst = [photos_with_time[0][0]]
     prev_time = photos_with_time[0][1]
+    prev_photo = photos_with_time[0][0]
     
-    for photo, time in photos_with_time[1:]:
-        if (time - prev_time).total_seconds() <= threshold_seconds:
-            current_burst.append(photo)
+    logger.info("Starting burst detection...")
+    
+    for i in range(1, len(photos_with_time)):
+        curr_photo, curr_time = photos_with_time[i]
+        
+        time_diff = (curr_time - prev_time).total_seconds() / 60.0
+        
+        is_same_burst = False
+        if time_diff > threshold_minutes:
+            # Definitely different burst
+            is_same_burst = False
         else:
-            bursts.append(current_burst)
-            current_burst = [photo]
-        prev_time = time
+            # Check with model
+            logger.info(f"Checking burst similarity: {prev_photo.name} vs {curr_photo.name} (diff: {time_diff:.1f}m)")
+            is_same_burst = are_photos_in_same_burst(prev_photo, curr_photo, model, processor, config)
+            
+        if is_same_burst:
+            current_burst.append(curr_photo)
+        else:
+            yield current_burst
+            current_burst = [curr_photo]
+            
+        prev_time = curr_time
+        prev_photo = curr_photo
             
     if current_burst:
-        bursts.append(current_burst)
-        
-    return bursts
+        yield current_burst
 
 
 def resize_image(image_path: Path, max_dimension: int = 1024) -> Optional[Path]:
@@ -609,11 +703,10 @@ def process_photos_batch(
         return results
 
     # Group into bursts
-    bursts = group_photos_into_bursts(photos_to_process)
-    logger.info(f"Grouped {len(photos_to_process)} photos into {len(bursts)} bursts")
-
-    for i, burst in enumerate(bursts):
-        logger.info(f"Processing burst {i + 1}/{len(bursts)} ({len(burst)} photos)")
+    burst_iterator = generate_bursts(photos_to_process, model, processor, config)
+    
+    for i, burst in enumerate(burst_iterator):
+        logger.info(f"Processing burst {i + 1} ({len(burst)} photos)")
         
         burst_analyses = []
         for photo_path in burst:
