@@ -59,7 +59,7 @@ def find_jpeg_photos(directory: Path) -> list[Path]:
 def analyze_photo_vlm(
     photo_path: Path,
     model_name: str = DEFAULT_VLM_MODEL,
-) -> PhotoAnalysis:
+) -> PhotoAnalysis | None:
     """Analyze a photo using Vision Language Model via mlx-vlm.
 
     Args:
@@ -67,7 +67,7 @@ def analyze_photo_vlm(
         model_name: Name of the mlx-vlm model to use.
 
     Returns:
-        PhotoAnalysis with rating, keywords, and description.
+        PhotoAnalysis with rating, keywords, and description, or None if analysis fails.
     """
     # Load model
     try:
@@ -76,12 +76,7 @@ def analyze_photo_vlm(
         config = load_config(model_name)
     except Exception as e:
         logger.error(f"Failed to load model {model_name}: {e}")
-        return PhotoAnalysis(
-            photo_path=photo_path,
-            rating=3,
-            keywords=["error", "model", "loading", "failed", "default"],
-            description=f"Model loading failed: {str(e)[:100]}",
-        )
+        return None
 
     # First prompt: Get star rating
     rating_prompt = """Analyze this photograph for technical quality, sharpness, and composition. Give it a star rating from 1 to 5. Output only the integer."""
@@ -291,6 +286,10 @@ def process_photos_batch(
 
         # Analyze photo
         analysis = analyze_photo_vlm(photo_path, model_name)
+
+        if analysis is None:
+            logger.warning(f"Skipping XMP generation for {photo_path.name} due to analysis failure")
+            continue
 
         # Generate XMP
         if output_dir:
