@@ -35,6 +35,8 @@ class PhotoAnalysis:
     rating: int  # 1-5 stars
     keywords: list[str]  # 5 keywords
     description: str  # Caption
+    primary_subject: Optional[str] = None
+    primary_subject_bounding_box: Optional[list[int]] = None
     raw_response: Optional[str] = None
 
 
@@ -85,6 +87,35 @@ def resize_image(image_path: Path, max_dimension: int = 1024) -> Optional[Path]:
         return None
 
 
+def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
+    """Crop image to bounding box. bbox is [ymin, xmin, ymax, xmax] on 0-1000 scale."""
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
+            ymin, xmin, ymax, xmax = bbox
+            
+            # Convert 0-1000 scale to pixels
+            left = int((xmin / 1000) * width)
+            top = int((ymin / 1000) * height)
+            right = int((xmax / 1000) * width)
+            bottom = int((ymax / 1000) * height)
+            
+            # Ensure valid crop
+            if left >= right or top >= bottom:
+                return None
+                
+            cropped = img.crop((left, top, right, bottom))
+            
+            # Save to temp file
+            tf = tempfile.NamedTemporaryFile(suffix=image_path.suffix, delete=False)
+            cropped.save(tf.name)
+            tf.close()
+            return Path(tf.name)
+    except Exception as e:
+        logger.warning(f"Failed to crop image {image_path}: {e}")
+        return None
+
+
 def analyze_photo_vlm(
     photo_path: Path,
     model,
@@ -117,12 +148,16 @@ def analyze_photo_vlm(
    - "EXCELLENT": Exceptional technical quality, compelling composition, artistic merit.
 2. "keywords": A list of exactly 5 keywords describing the image content.
 3. "description": A brief one-sentence caption describing what you see.
+4. "primary_subject": A short phrase identifying the main subject.
+5. "primary_subject_bounding_box": The bounding box of the primary subject as [ymin, xmin, ymax, xmax] on a 0-1000 scale.
 
 Example output:
 {
   "rating": "GOOD",
   "keywords": ["sunset", "beach", "ocean", "waves", "sky"],
-  "description": "A beautiful sunset over the ocean with waves crashing on the beach."
+  "description": "A beautiful sunset over the ocean with waves crashing on the beach.",
+  "primary_subject": "sun",
+  "primary_subject_bounding_box": [300, 400, 500, 600]
 }
 Output only the JSON object."""
 
@@ -182,6 +217,71 @@ Output only the JSON object."""
             description = str(data.get("description", "Photo from travel collection."))
             if len(description) > 300:
                 description = description[:297] + "..."
+            
+            primary_subject = data.get("primary_subject")
+            primary_subject_bounding_box = data.get("primary_subject_bounding_box")
+            
+            # Secondary analysis: Check subject sharpness
+            if primary_subject and primary_subject_bounding_box and isinstance(primary_subject_bounding_box, list) and len(primary_subject_bounding_box) == 4:
+                logger.debug(f"Performing secondary subject analysis for {primary_subject}")
+                crop_path = crop_image(photo_path, primary_subject_bounding_box)
+                
+                if crop_path:
+                    # Resize crop if needed to avoid memory issues
+                    resized_crop = resize_image(crop_path)
+                    final_crop_path = resized_crop if resized_crop else crop_path
+                    
+                    try:
+                        subject_prompt = f"""Look at this cropped image of the {primary_subject}. Is the subject sharp and in focus? 
+Answer with a JSON object: {{"sharp": true}} or {{"sharp": false}}."""
+                        
+                        formatted_subject_prompt = apply_chat_template(
+                            processor, config, subject_prompt, num_images=1
+                        )
+                        
+                        subject_response = generate(
+                            model,
+                            processor,
+                            formatted_subject_prompt,
+                            [str(final_crop_path)],
+                            verbose=False,
+                            max_tokens=50,
+                        )
+                        
+                        if hasattr(subject_response, "text"):
+                            subject_text = subject_response.text
+                        else:
+                            subject_text = str(subject_response)
+                            
+                        # Clean JSON
+                        clean_subject = subject_text.strip()
+                        if clean_subject.startswith("```json"): clean_subject = clean_subject[7:]
+                        if clean_subject.startswith("```"): clean_subject = clean_subject[3:]
+                        if clean_subject.endswith("```"): clean_subject = clean_subject[:-3]
+                        clean_subject = clean_subject.strip()
+                        
+                        try:
+                            subject_data = json.loads(clean_subject)
+                            if not subject_data.get("sharp", True):
+                                logger.info(f"Subject '{primary_subject}' detected as blurry. Downgrading rating to 1.")
+                                rating = 1
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse subject analysis response: {subject_text}")
+                            
+                    except Exception as e:
+                        logger.warning(f"Secondary analysis failed: {e}")
+                    finally:
+                        # Cleanup
+                        if resized_crop and resized_crop.exists():
+                            try:
+                                os.unlink(resized_crop)
+                            except Exception:
+                                pass
+                        if crop_path.exists():
+                            try:
+                                os.unlink(crop_path)
+                            except Exception:
+                                pass
                 
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing failed: {e}. Response: {response_text}")
@@ -189,12 +289,16 @@ Output only the JSON object."""
             rating = 3
             keywords = ["photo", "image", "travel", "memory", "capture"]
             description = "Photo from travel collection."
+            primary_subject = None
+            primary_subject_bounding_box = None
             
         return PhotoAnalysis(
             photo_path=photo_path,
             rating=rating,
             keywords=keywords,
             description=description,
+            primary_subject=primary_subject,
+            primary_subject_bounding_box=primary_subject_bounding_box,
             raw_response=response_text,
         )
 
