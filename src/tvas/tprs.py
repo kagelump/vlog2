@@ -269,6 +269,39 @@ def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = 
     return output_path
 
 
+def get_xmp_info(xmp_path: Path) -> tuple[str, list[str]]:
+    """Extract rating and keywords from XMP file."""
+    try:
+        tree = ET.parse(xmp_path)
+        root = tree.getroot()
+        
+        namespaces = {
+            'xmp': 'http://ns.adobe.com/xap/1.0/',
+            'dc': 'http://purl.org/dc/elements/1.1/',
+            'rdf': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+        }
+        
+        rating = "Unknown"
+        keywords = []
+        
+        # Search for Rating
+        rating_elem = root.find(".//xmp:Rating", namespaces)
+        if rating_elem is not None:
+            rating = rating_elem.text
+            
+        # Search for Keywords
+        bag = root.find(".//dc:subject/rdf:Bag", namespaces)
+        if bag is not None:
+            for li in bag.findall("rdf:li", namespaces):
+                if li.text:
+                    keywords.append(li.text)
+                    
+        return rating, keywords
+    except Exception as e:
+        logger.warning(f"Failed to parse XMP {xmp_path}: {e}")
+        return "Error", []
+
+
 def process_photos_batch(
     photos: list[Path],
     model_name: str = DEFAULT_VLM_MODEL,
@@ -285,6 +318,34 @@ def process_photos_batch(
         List of (PhotoAnalysis, xmp_path) tuples.
     """
     results = []
+    photos_to_process = []
+
+    # Check for existing sidecars
+    for photo_path in photos:
+        if output_dir:
+            xmp_path = output_dir / f"{photo_path.stem}.xmp"
+        else:
+            xmp_path = photo_path.with_suffix(".xmp")
+            
+        if xmp_path.exists():
+            rating, keywords = get_xmp_info(xmp_path)
+            logger.info(f"Sidecar exists for {photo_path.name}: rating {rating}, keywords {keywords}")
+            
+            # Reconstruct analysis for summary
+            analysis = PhotoAnalysis(
+                photo_path=photo_path,
+                rating=int(rating) if rating and rating.isdigit() else 0,
+                keywords=keywords,
+                description="Loaded from XMP",
+                raw_response=None
+            )
+            results.append((analysis, xmp_path))
+        else:
+            photos_to_process.append(photo_path)
+
+    if not photos_to_process:
+        logger.info("All photos have existing sidecars. No processing needed.")
+        return results
 
     # Load model once
     try:
@@ -295,8 +356,8 @@ def process_photos_batch(
         logger.error(f"Failed to load model {model_name}: {e}")
         return results
 
-    for i, photo_path in enumerate(photos):
-        logger.info(f"Processing photo {i + 1}/{len(photos)}: {photo_path.name}")
+    for i, photo_path in enumerate(photos_to_process):
+        logger.info(f"Processing photo {i + 1}/{len(photos_to_process)}: {photo_path.name}")
 
         # Analyze photo
         analysis = analyze_photo_vlm(photo_path, model, processor, config)
