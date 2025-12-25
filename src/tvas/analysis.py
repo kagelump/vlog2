@@ -16,26 +16,18 @@ from typing import Any, Tuple, cast
 import mlx.core as mx
 from pydantic import BaseModel, ValidationError
 
-
-import torch
-from transformers.video_utils import load_video
-from transformers import AutoVideoProcessor
-
 from mlx_vlm.video_generate import process_vision_info
 from mlx_vlm.video_generate import generate
 from mlx_vlm import generate as mlx_vlm_generate
 from mlx_vlm import load
 
 from tvas.proxy import get_video_duration
-from tvas import load_prompt
+from tvas import load_prompt, DEFAULT_VLM_MODEL
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 logger = logging.getLogger(__name__)
-
-# Default model for mlx-vlm
-DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
 
 # Video sampling parameters
 VIDEO_FPS = 10.0  # Sample at 10fps for analysis

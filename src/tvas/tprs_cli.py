@@ -9,8 +9,8 @@ import logging
 import sys
 from pathlib import Path
 
+from tvas import DEFAULT_VLM_MODEL
 from tvas.tprs import (
-    DEFAULT_VLM_MODEL,
     find_jpeg_photos,
     process_photos_batch,
 )

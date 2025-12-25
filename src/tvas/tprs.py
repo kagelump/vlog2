@@ -17,7 +17,7 @@ from xml.etree import ElementTree as ET
 
 from PIL import Image, ExifTags
 
-from tvas import load_prompt
+from tvas import load_prompt, DEFAULT_VLM_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,6 @@ logger = logging.getLogger(__name__)
 from mlx_vlm import load, generate
 from mlx_vlm.prompt_utils import apply_chat_template
 from mlx_vlm.utils import load_config
-
-# Default model for mlx-vlm
-DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
 
 
 @dataclass

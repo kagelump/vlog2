@@ -13,10 +13,11 @@ import toga
 from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
 
-from tvas.tprs import PhotoAnalysis, process_photos_batch, find_jpeg_photos, DEFAULT_VLM_MODEL
+from tvas.tprs import PhotoAnalysis, process_photos_batch, find_jpeg_photos
+from tvas import DEFAULT_VLM_MODEL
 
 # Configure logging to capture everything
-logger = logging.getLogger("tvas")
+logger = logging.getLogger(__name__)
 
 class GuiLogHandler(logging.Handler):
     """Custom logging handler that writes to a Toga Label."""

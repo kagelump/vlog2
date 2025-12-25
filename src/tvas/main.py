@@ -13,7 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from tvas.analysis import analyze_clips_batch, DEFAULT_VLM_MODEL
+from tvas import DEFAULT_VLM_MODEL
+from tvas.analysis import analyze_clips_batch
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
 from tvas.proxy import generate_proxies_batch
 from tvas.timeline import TimelineConfig, create_timeline_from_analysis, export_analysis_json
