@@ -28,6 +28,11 @@ wheels/
 *.manifest
 *.spec
 
+# Build artifacts
+build_artifacts/
+tvas_release/
+tvas_mac_release.zip
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
