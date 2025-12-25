@@ -216,8 +216,8 @@ class TprsStatusApp(toga.App):
         # Add to start of list
         self.recent_box.insert(0, thumb_box)
         
-        # Keep only last 15
-        if len(self.recent_box.children) > 15:
+        # Keep only last 12
+        if len(self.recent_box.children) > 12:
             self.recent_box.remove(self.recent_box.children[-1])
 
 def main(directory: Path, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL):
