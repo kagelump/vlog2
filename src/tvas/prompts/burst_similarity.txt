@@ -1,0 +1,7 @@
+Look at these two photos. Do they belong to the same scene or burst of shots?
+They should be considered the same burst if:
+1. They show the same subject in the same location.
+2. They were taken in quick succession (which you can infer from lighting and subject position).
+3. They are visually very similar.
+
+Answer with a JSON object: {"same_burst": true} or {"same_burst": false}.

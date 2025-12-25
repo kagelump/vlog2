@@ -17,6 +17,8 @@ from xml.etree import ElementTree as ET
 
 from PIL import Image, ExifTags
 
+from tvas import load_prompt
+
 logger = logging.getLogger(__name__)
 
 # mlx-vlm is required
@@ -106,13 +108,7 @@ def are_photos_in_same_burst(
             str(p2_resized if p2_resized else photo2)
         ]
         
-        prompt = """Look at these two photos. Do they belong to the same scene or burst of shots?
-They should be considered the same burst if:
-1. They show the same subject in the same location.
-2. They were taken in quick succession (which you can infer from lighting and subject position).
-3. They are visually very similar.
-
-Answer with a JSON object: {"same_burst": true} or {"same_burst": false}."""
+        prompt = load_prompt("burst_similarity.txt")
 
         formatted_prompt = apply_chat_template(
             processor, config, prompt, num_images=2
@@ -289,27 +285,7 @@ def analyze_photo_vlm(
 
     try:
         # Single prompt for JSON output
-        json_prompt = """Analyze this photograph and provide a JSON object with the following fields:
-1. "rating": One of the following categories based on technical quality and composition:
-   - "UNUSABLE": Excessive blur, out of focus, or severe exposure issues.
-   - "BAD": Poor composition, distracting elements, or minor technical issues.
-   - "OK": Acceptable quality, standard composition, nothing special.
-   - "GOOD": Sharp, well-exposed, good composition, interesting subject.
-   - "EXCELLENT": Exceptional technical quality, compelling composition, artistic merit.
-2. "keywords": A list of exactly 5 keywords describing the image content.
-3. "description": A brief one-sentence caption describing what you see.
-4. "primary_subject": A short phrase identifying the main subject.
-5. "primary_subject_bounding_box": The bounding box of the primary subject as [ymin, xmin, ymax, xmax] on a 0-1000 scale.
-
-Example output:
-{
-  "rating": "GOOD",
-  "keywords": ["sunset", "beach", "ocean", "waves", "sky"],
-  "description": "A beautiful sunset over the ocean with waves crashing on the beach.",
-  "primary_subject": "sun",
-  "primary_subject_bounding_box": [300, 400, 500, 600]
-}
-Output only the JSON object."""
+        json_prompt = load_prompt("photo_analysis.txt")
 
         logger.debug(f"Analyzing {photo_path.name} with JSON prompt")
         formatted_prompt = apply_chat_template(
@@ -391,13 +367,8 @@ Output only the JSON object."""
                     final_crop_path = resized_crop if resized_crop else crop_path
                     
                     try:
-                        subject_prompt = f"""Look at this cropped image of the {primary_subject}. Analyze the sharpness and focus of the subject.
-Classify the blur level as one of the following:
-- "SHARP": The subject is sharp and in focus.
-- "MINOR_BLURRY": The subject is slightly blurry or soft, but still recognizable and usable, and fixable with postprocessing.
-- "VERY_BLURRY": The subject is completely out of focus, blurry, or unrecognizable, and is not salvagable.
-
-Answer with a JSON object: {{"blur_level": "SHARP" | "MINOR_BLURRY" | "VERY_BLURRY"}}."""
+                        subject_prompt_template = load_prompt("subject_sharpness.txt")
+                        subject_prompt = subject_prompt_template.format(primary_subject=primary_subject)
                         
                         formatted_subject_prompt = apply_chat_template(
                             processor, config, subject_prompt, num_images=1
@@ -611,9 +582,7 @@ def select_best_in_burst(
             else:
                 image_paths.append(str(c.photo_path))
         
-        prompt = """Look at these photos from the same burst. Which one is the best in terms of composition, sharpness, and expression? 
-Respond with a JSON object containing the index of the best photo (0-based) and a brief reason.
-Example: {"best_index": 1, "reason": "Subject is sharpest and has best smile."}"""
+        prompt = load_prompt("best_in_burst.txt")
 
         formatted_prompt = apply_chat_template(
             processor, config, prompt, num_images=len(image_paths)

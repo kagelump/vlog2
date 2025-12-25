@@ -1,0 +1,3 @@
+Look at these photos from the same burst. Which one is the best in terms of composition, sharpness, and expression? 
+Respond with a JSON object containing the index of the best photo (0-based) and a brief reason.
+Example: {"best_index": 1, "reason": "Subject is sharpest and has best smile."}

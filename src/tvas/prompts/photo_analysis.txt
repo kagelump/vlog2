@@ -1,0 +1,21 @@
+Analyze this photograph and provide a JSON object with the following fields:
+1. "rating": One of the following categories based on technical quality and composition:
+   - "UNUSABLE": Excessive blur, out of focus, or severe exposure issues.
+   - "BAD": Poor composition, distracting elements, or minor technical issues.
+   - "OK": Acceptable quality, standard composition, nothing special.
+   - "GOOD": Sharp, well-exposed, good composition, interesting subject.
+   - "EXCELLENT": Exceptional technical quality, compelling composition, artistic merit.
+2. "keywords": A list of exactly 5 keywords describing the image content.
+3. "description": A brief one-sentence caption describing what you see.
+4. "primary_subject": A short phrase identifying the main subject.
+5. "primary_subject_bounding_box": The bounding box of the primary subject as [ymin, xmin, ymax, xmax] on a 0-1000 scale.
+
+Example output:
+{
+  "rating": "GOOD",
+  "keywords": ["sunset", "beach", "ocean", "waves", "sky"],
+  "description": "A beautiful sunset over the ocean with waves crashing on the beach.",
+  "primary_subject": "sun",
+  "primary_subject_bounding_box": [300, 400, 500, 600]
+}
+Output only the JSON object.
