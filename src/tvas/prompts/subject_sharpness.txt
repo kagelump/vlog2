@@ -1,7 +1,7 @@
 Look at this cropped image of the {primary_subject}. Analyze the sharpness and focus of the subject.
 Classify the blur level as one of the following:
-- "SHARP": The subject is sharp and in focus.
-- "MINOR_BLURRY": The subject is slightly blurry or soft, but still recognizable and usable, and fixable with postprocessing.
-- "VERY_BLURRY": The subject is completely out of focus, blurry, or unrecognizable, and is not salvagable.
+- "SHARP": The subject is sharp and in focus. Fine details are visible.
+- "MINOR_BLURRY": The subject is slightly blurry or soft, but still recognizable and usable.
+- "VERY_BLURRY": The subject is completely out of focus, blurry, or unrecognizable.
 
 Answer with a JSON object: {{"blur_level": "SHARP" | "MINOR_BLURRY" | "VERY_BLURRY"}}.
