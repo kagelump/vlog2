@@ -65,6 +65,10 @@ cp -r dist/tprs "$DIST_NAME/"
 # Copy README
 cp README.md "$DIST_NAME/"
 
+# Copy Model Installer
+cp install_model.sh "$DIST_NAME/"
+chmod +x "$DIST_NAME/install_model.sh"
+
 # Create a helper script to run them easily (optional, but helpful)
 cat << EOF > "$DIST_NAME/install.sh"
 #!/bin/bash
@@ -72,6 +76,9 @@ cat << EOF > "$DIST_NAME/install.sh"
 echo "You can run the tools directly from this folder:"
 echo "  ./tvas/tvas"
 echo "  ./tprs/tprs"
+echo ""
+echo "To install the AI model (Required for first run):"
+echo "  ./install_model.sh"
 echo ""
 echo "To install to /usr/local/bin (requires sudo):"
 echo "  sudo ln -sf \$(pwd)/tvas/tvas /usr/local/bin/tvas"
