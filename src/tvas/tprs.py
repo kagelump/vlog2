@@ -164,7 +164,8 @@ def generate_bursts(
     model,
     processor,
     config,
-    threshold_minutes: float = 5.0
+    threshold_minutes: float = 5.0,
+    comparison_callback: Optional[Callable[[Path, Path], None]] = None
 ) -> Iterator[list[Path]]:
     """Yield bursts of photos based on capture time and visual similarity."""
     if not photos:
@@ -195,6 +196,8 @@ def generate_bursts(
         else:
             # Check with model
             logger.info(f"Checking burst similarity: {prev_photo.name} vs {curr_photo.name} (diff: {time_diff:.1f}m)")
+            if comparison_callback:
+                comparison_callback(prev_photo, curr_photo)
             is_same_burst = are_photos_in_same_burst(prev_photo, curr_photo, model, processor, config)
             
         if is_same_burst:
@@ -388,8 +391,13 @@ Output only the JSON object."""
                     final_crop_path = resized_crop if resized_crop else crop_path
                     
                     try:
-                        subject_prompt = f"""Look at this cropped image of the {primary_subject}. Is the subject sharp and in focus? 
-Answer with a JSON object: {{"sharp": true}} or {{"sharp": false}}."""
+                        subject_prompt = f"""Look at this cropped image of the {primary_subject}. Analyze the sharpness and focus of the subject.
+Classify the blur level as one of the following:
+- "SHARP": The subject is sharp and in focus.
+- "MINOR_BLURRY": The subject is slightly blurry or soft, but still recognizable and usable, and fixable with postprocessing.
+- "VERY_BLURRY": The subject is completely out of focus, blurry, or unrecognizable, and is not salvagable.
+
+Answer with a JSON object: {{"blur_level": "SHARP" | "MINOR_BLURRY" | "VERY_BLURRY"}}."""
                         
                         formatted_subject_prompt = apply_chat_template(
                             processor, config, subject_prompt, num_images=1
@@ -418,9 +426,15 @@ Answer with a JSON object: {{"sharp": true}} or {{"sharp": false}}."""
                         
                         try:
                             subject_data = json.loads(clean_subject)
-                            if not subject_data.get("sharp", True):
-                                logger.info(f"Subject '{primary_subject}' detected as blurry. Downgrading rating to 1.")
+                            blur_level = subject_data.get("blur_level", "SHARP")
+                            
+                            if blur_level == "VERY_BLURRY":
+                                logger.info(f"Subject '{primary_subject}' detected as VERY_BLURRY. Downgrading rating to 1.")
                                 rating = 1
+                            elif blur_level == "MINOR_BLURRY":
+                                logger.info(f"Subject '{primary_subject}' detected as MINOR_BLURRY. Reducing rating by 1.")
+                                rating = max(2, rating - 1)
+                                
                         except json.JSONDecodeError:
                             logger.warning(f"Failed to parse subject analysis response: {subject_text}")
                             
@@ -652,7 +666,7 @@ def process_photos_batch(
     photos: list[Path],
     model_name: str = DEFAULT_VLM_MODEL,
     output_dir: Optional[Path] = None,
-    status_callback: Optional[Callable[[int, int, Optional[Path], Optional[PhotoAnalysis]], None]] = None,
+    status_callback: Optional[Callable[[int, int, Optional[Path], Optional[PhotoAnalysis], Optional[Path]], None]] = None,
 ) -> list[tuple[PhotoAnalysis, Path]]:
     """Process a batch of photos and generate XMP sidecars.
 
@@ -660,7 +674,7 @@ def process_photos_batch(
         photos: List of photo paths to process.
         model_name: mlx-vlm model name.
         output_dir: Optional output directory for XMP files.
-        status_callback: Callback for progress updates (processed, total, current_photo, last_analysis).
+        status_callback: Callback for progress updates (processed, total, current_photo, last_analysis, comparison_photo).
 
     Returns:
         List of (PhotoAnalysis, xmp_path) tuples.
@@ -695,7 +709,11 @@ def process_photos_batch(
     processed_count = len(results)
 
     if status_callback:
-        status_callback(processed_count, total_photos, None, None)
+        try:
+            status_callback(processed_count, total_photos, None, None)
+        except TypeError:
+             status_callback(processed_count, total_photos, None, None, None)
+
 
     if not photos_to_process:
         logger.info("All photos have existing sidecars. No processing needed.")
@@ -710,8 +728,18 @@ def process_photos_batch(
         logger.error(f"Failed to load model {model_name}: {e}")
         return results
 
+    # Define comparison callback wrapper
+    comparison_cb = None
+    if status_callback:
+        def comparison_cb(prev, curr):
+            try:
+                status_callback(processed_count, total_photos, curr, None, prev)
+            except TypeError:
+                # Fallback for callbacks that don't support the extra argument
+                status_callback(processed_count, total_photos, curr, None)
+
     # Group into bursts
-    burst_iterator = generate_bursts(photos_to_process, model, processor, config)
+    burst_iterator = generate_bursts(photos_to_process, model, processor, config, comparison_callback=comparison_cb)
     
     for i, burst in enumerate(burst_iterator):
         logger.info(f"Processing burst {i + 1} ({len(burst)} photos)")
@@ -720,7 +748,10 @@ def process_photos_batch(
         for photo_path in burst:
             # Notify start
             if status_callback:
-                status_callback(processed_count, total_photos, photo_path, None)
+                try:
+                    status_callback(processed_count, total_photos, photo_path, None, None)
+                except TypeError:
+                    status_callback(processed_count, total_photos, photo_path, None)
 
             # Analyze photo
             analysis = analyze_photo_vlm(photo_path, model, processor, config)
@@ -731,11 +762,17 @@ def process_photos_batch(
                 burst_analyses.append(analysis)
                 # Notify end with analysis
                 if status_callback:
-                    status_callback(processed_count, total_photos, photo_path, analysis)
+                    try:
+                        status_callback(processed_count, total_photos, photo_path, analysis, None)
+                    except TypeError:
+                        status_callback(processed_count, total_photos, photo_path, analysis)
             else:
                 # Notify end (failed)
                 if status_callback:
-                    status_callback(processed_count, total_photos, photo_path, None)
+                    try:
+                        status_callback(processed_count, total_photos, photo_path, None, None)
+                    except TypeError:
+                        status_callback(processed_count, total_photos, photo_path, None)
 
         if not burst_analyses:
             continue

@@ -63,10 +63,17 @@ class TprsStatusApp(toga.App):
         
         # Use a flexible height and width to allow the image to scale properly
         self.image_view = toga.ImageView(style=Pack(flex=1))
+        self.image_view_2 = toga.ImageView(style=Pack(flex=1))
+        
+        self.images_container = toga.Box(
+            children=[self.image_view],
+            style=Pack(direction=ROW, flex=1)
+        )
+        
         self.photo_label = toga.Label("No photo loaded", style=Pack(padding=5, text_align=CENTER))
         
         main_box = toga.Box(
-            children=[self.image_view, self.photo_label],
+            children=[self.images_container, self.photo_label],
             style=Pack(direction=COLUMN, flex=1, padding=10)
         )
 
@@ -137,25 +144,41 @@ class TprsStatusApp(toga.App):
         finally:
             self.is_running = False
 
-    def status_callback_shim(self, processed, total, current_photo, last_analysis):
+    def status_callback_shim(self, processed, total, current_photo, last_analysis, comparison_photo=None):
         """Shim to call update_ui from the background thread."""
-        self.loop.call_soon_threadsafe(self.update_ui, processed, total, current_photo, last_analysis)
+        self.loop.call_soon_threadsafe(self.update_ui, processed, total, current_photo, last_analysis, comparison_photo)
 
-    def update_ui(self, processed, total, current_photo, last_analysis):
+    def update_ui(self, processed, total, current_photo, last_analysis, comparison_photo=None):
         """Update UI elements on the main thread."""
         self.processed_count = processed
         self.progress_bar.value = processed
         self.status_label.text = f"Processing: {processed}/{total}"
         
         if current_photo:
-            self.photo_label.text = current_photo.name
-            try:
-                # Toga ImageView loads from path
-                # Ensure path is absolute and string
-                abs_path = str(current_photo.resolve())
-                self.image_view.image = toga.Image(abs_path)
-            except Exception as e:
-                logger.warning(f"Failed to load image preview for {current_photo}: {e}")
+            if comparison_photo:
+                self.photo_label.text = f"Comparing: {comparison_photo.name} vs {current_photo.name}"
+                # Ensure both views are in container
+                if self.image_view_2 not in self.images_container.children:
+                    self.images_container.add(self.image_view_2)
+                
+                try:
+                    self.image_view.image = toga.Image(str(comparison_photo.resolve()))
+                    self.image_view_2.image = toga.Image(str(current_photo.resolve()))
+                except Exception as e:
+                    logger.warning(f"Failed to load comparison images: {e}")
+            else:
+                self.photo_label.text = current_photo.name
+                # Ensure only main view is in container
+                if self.image_view_2 in self.images_container.children:
+                    self.images_container.remove(self.image_view_2)
+
+                try:
+                    # Toga ImageView loads from path
+                    # Ensure path is absolute and string
+                    abs_path = str(current_photo.resolve())
+                    self.image_view.image = toga.Image(abs_path)
+                except Exception as e:
+                    logger.warning(f"Failed to load image preview for {current_photo}: {e}")
 
         if last_analysis:
             self.add_recent_photo(last_analysis)
@@ -179,15 +202,22 @@ class TprsStatusApp(toga.App):
             subject_text = subject_text[:13] + ".."
         subject_label = toga.Label(subject_text, style=Pack(text_align=CENTER, font_size=10))
         
-        thumb_box.add(view)
+        if "BestInBurst" in analysis.keywords:
+            # Wrap in red box for border effect
+            border_box = toga.Box(style=Pack(background_color="red", padding=2))
+            border_box.add(view)
+            thumb_box.add(border_box)
+        else:
+            thumb_box.add(view)
+
         thumb_box.add(rating_label)
         thumb_box.add(subject_label)
         
         # Add to start of list
         self.recent_box.insert(0, thumb_box)
         
-        # Keep only last 5
-        if len(self.recent_box.children) > 5:
+        # Keep only last 15
+        if len(self.recent_box.children) > 15:
             self.recent_box.remove(self.recent_box.children[-1])
 
 def main(directory: Path, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL):
