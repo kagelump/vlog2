@@ -80,10 +80,27 @@ tvas --volume /Volumes/DJI_POCKET3 --no-vlm
 
 ### TPRS - Photo Rating System
 
-#### Process Photos from SD Card
+TPRS runs in GUI mode by default for easy folder selection and progress monitoring.
+
+#### Launch GUI Mode (Default)
 
 ```bash
-tprs /Volumes/SD_CARD
+tprs                          # Launch GUI with folder selection dialog
+tprs /Volumes/SD_CARD         # Launch GUI with pre-selected folder
+```
+
+The GUI will:
+- Show a folder selection dialog (if no folder specified)
+- Display progress with photo previews
+- Show real-time analysis results
+- Display recently processed photos with ratings
+
+#### Run in Headless Mode
+
+For automated workflows or when GUI is not needed:
+
+```bash
+tprs /Volumes/SD_CARD --headless
 ```
 
 This will:
@@ -97,13 +114,13 @@ This will:
 #### Output XMP Files to Different Directory
 
 ```bash
-tprs /Volumes/SD_CARD --output /path/to/xmp/files
+tprs /Volumes/SD_CARD --headless --output /path/to/xmp/files
 ```
 
 #### Preview Photos Without Processing
 
 ```bash
-tprs /Volumes/SD_CARD --dry-run
+tprs /Volumes/SD_CARD --headless --dry-run
 ```
 
 #### Use with DxO PhotoLab
