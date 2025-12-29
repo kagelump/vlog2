@@ -6,6 +6,7 @@ AI-powered ratings, keywords, and descriptions.
 
 import argparse
 import logging
+import multiprocessing
 import sys
 from pathlib import Path
 
@@ -162,4 +163,5 @@ Examples:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()
