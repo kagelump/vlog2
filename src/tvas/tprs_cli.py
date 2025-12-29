@@ -69,7 +69,7 @@ Examples:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Find photos but don't process them",
+        help="Find photos but don't process them (headless mode only)",
     )
 
     parser.add_argument(
@@ -82,6 +82,12 @@ Examples:
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # Validate flag combinations
+    if args.dry_run and not args.headless:
+        logger.error("--dry-run flag requires --headless mode")
+        parser.print_help()
+        sys.exit(1)
 
     # Default to GUI mode unless --headless is specified
     if not args.headless:
