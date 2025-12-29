@@ -37,7 +37,7 @@ class GuiLogHandler(logging.Handler):
 
 
 class TprsStatusApp(toga.App):
-    def __init__(self, directory: Path, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL):
+    def __init__(self, directory: Optional[Path] = None, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL):
         super().__init__("TPRS Status", "com.tvas.tprs_status")
         self.directory = directory
         self.output_dir = output_dir
@@ -50,10 +50,42 @@ class TprsStatusApp(toga.App):
     def startup(self):
         """Construct and show the Toga application."""
         
+        # --- Control Panel: Folder Selection and Start Button ---
+        self.folder_input = toga.TextInput(
+            readonly=True,
+            placeholder="Select a folder to scan...",
+            style=Pack(flex=1, padding=(0, 5))
+        )
+        if self.directory:
+            self.folder_input.value = str(self.directory)
+        
+        self.folder_button = toga.Button(
+            "Browse...",
+            on_press=self.select_folder,
+            style=Pack(padding=(0, 5))
+        )
+        
+        self.start_button = toga.Button(
+            "Start Analysis",
+            on_press=self.start_analysis,
+            enabled=self.directory is not None,
+            style=Pack(padding=(0, 5))
+        )
+        
+        folder_row = toga.Box(
+            children=[
+                toga.Label("Folder:", style=Pack(padding=(5, 5), width=60)),
+                self.folder_input,
+                self.folder_button,
+                self.start_button
+            ],
+            style=Pack(direction=ROW, padding=5)
+        )
+        
         # --- Header: Progress & Logs ---
         self.progress_bar = toga.ProgressBar(max=100, value=0, style=Pack(padding=(0, 10), flex=1))
-        self.status_label = toga.Label("Initializing...", style=Pack(padding=(5, 10)))
-        self.log_label = toga.Label("Ready", style=Pack(padding=(0, 10), font_family="monospace", font_size=10))
+        self.status_label = toga.Label("Ready to start", style=Pack(padding=(5, 10)))
+        self.log_label = toga.Label("Select a folder and click Start Analysis", style=Pack(padding=(0, 10), font_family="monospace", font_size=10))
         
         header_box = toga.Box(
             children=[self.status_label, self.progress_bar, self.log_label],
@@ -89,7 +121,7 @@ class TprsStatusApp(toga.App):
         # --- Main Layout ---
         self.main_window = toga.MainWindow(title=self.formal_name, size=(1000, 800))
         self.main_window.content = toga.Box(
-            children=[header_box, main_box, footer_container],
+            children=[folder_row, header_box, main_box, footer_container],
             style=Pack(direction=COLUMN)
         )
         
@@ -99,9 +131,49 @@ class TprsStatusApp(toga.App):
         logging.getLogger().setLevel(logging.INFO)
 
         self.main_window.show()
+    
+    async def select_folder(self, widget):
+        """Handle folder selection."""
+        try:
+            # Use Toga's folder selection dialog
+            folder = await self.main_window.select_folder_dialog(
+                title="Select folder to scan for photos"
+            )
+            
+            if folder:
+                self.directory = Path(folder)
+                self.folder_input.value = str(self.directory)
+                self.start_button.enabled = True
+                self.status_label.text = "Folder selected. Click Start Analysis to begin."
+                logger.info(f"Selected folder: {self.directory}")
+        except Exception as e:
+            logger.error(f"Error selecting folder: {e}")
+            self.status_label.text = f"Error selecting folder. Please try again."
+    
+    async def start_analysis(self, widget):
+        """Start the analysis when user clicks the button."""
+        if not self.directory:
+            self.status_label.text = "Please select a folder first."
+            return
         
-        # Start processing automatically
-        self.add_background_task(self.run_analysis)
+        if self.is_running:
+            self.status_label.text = "Analysis is already running."
+            return
+        
+        # Disable the start button during analysis
+        self.start_button.enabled = False
+        self.folder_button.enabled = False
+        
+        try:
+            # Start processing
+            await self.run_analysis(widget)
+        except Exception as e:
+            logger.error(f"Unexpected error during analysis: {e}")
+            self.status_label.text = f"Analysis failed: {e}"
+            # Ensure buttons are re-enabled even on unexpected errors
+            self.start_button.enabled = True
+            self.folder_button.enabled = True
+            self.is_running = False
 
     async def run_analysis(self, widget):
         """Run the analysis in a background thread."""
@@ -120,6 +192,8 @@ class TprsStatusApp(toga.App):
             if not photos:
                 self.status_label.text = "No photos found."
                 self.is_running = False
+                self.start_button.enabled = True
+                self.folder_button.enabled = True
                 return
 
             self.total_count = len(photos)
@@ -144,6 +218,8 @@ class TprsStatusApp(toga.App):
             self.status_label.text = f"Error: {e}"
         finally:
             self.is_running = False
+            self.start_button.enabled = True
+            self.folder_button.enabled = True
 
     def status_callback_shim(self, processed, total, current_photo, last_analysis, comparison_photo=None):
         """Shim to call update_ui from the background thread."""
@@ -221,5 +297,5 @@ class TprsStatusApp(toga.App):
         if len(self.recent_box.children) > 12:
             self.recent_box.remove(self.recent_box.children[-1])
 
-def main(directory: Path, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL):
+def main(directory: Optional[Path] = None, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL):
     return TprsStatusApp(directory, output_dir, model)

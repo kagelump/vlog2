@@ -39,6 +39,7 @@ Examples:
     parser.add_argument(
         "directory",
         type=Path,
+        nargs='?',
         help="Directory to scan for JPEG photos (e.g., SD card mount point)",
     )
 
@@ -80,16 +81,21 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Check directory exists
-    if not args.directory.exists():
-        logger.error(f"Directory does not exist: {args.directory}")
-        sys.exit(1)
-
     if args.gui:
         from tvas.tprs_ui import main as ui_main
         app = ui_main(args.directory, args.output, args.model)
         app.main_loop()
         sys.exit(0)
+
+    # Check directory exists (required for non-GUI mode)
+    if not args.directory:
+        logger.error("Directory argument is required for non-GUI mode")
+        parser.print_help()
+        sys.exit(1)
+    
+    if not args.directory.exists():
+        logger.error(f"Directory does not exist: {args.directory}")
+        sys.exit(1)
 
     # Find photos
     logger.info(f"Scanning for JPEG photos in {args.directory}")
