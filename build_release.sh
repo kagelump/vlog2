@@ -40,6 +40,10 @@ pyinstaller --noconfirm --clean \
     --hidden-import=tvas.main \
     src/tvas/main.py
 
+# Find HuggingFace cache directory
+HF_CACHE=$(python -c "from huggingface_hub import snapshot_download; import os; print(os.path. dirname(snapshot_download('mlx-community/Qwen3-VL-8B-Instruct-8bit', cache_dir=None)))")
+echo "Found HuggingFace cache at: $HF_CACHE"
+
 # Build TPRS (Photo Rating CLI)
 echo -e "${GREEN}Building TPRS executable...${NC}"
 pyinstaller --noconfirm --clean \

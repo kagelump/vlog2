@@ -688,8 +688,8 @@ def process_photos_batch(
     # Load model once
     try:
         logger.info(f"Loading mlx-vlm model: {model_name}")
-        model, processor = load(model_name)
-        config = load_config(model_name)
+        model, processor = load(model_name, trust_remote_code=True)
+        config = load_config(model_name, trust_remote_code=True)
     except Exception as e:
         logger.error(f"Failed to load model {model_name}: {e}")
         return results
