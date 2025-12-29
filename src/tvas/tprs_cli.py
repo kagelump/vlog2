@@ -30,9 +30,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  tprs /Volumes/SD_CARD                    # Scan SD card and generate XMP files
-  tprs /path/to/photos --output /tmp/xmp   # Output XMP files to specific directory
-  tprs /path/to/photos --model qwen2-vl-7b # Use specific model
+  tprs                                            # Launch GUI for folder selection
+  tprs /Volumes/SD_CARD                           # Launch GUI with pre-selected folder
+  tprs /Volumes/SD_CARD --headless                # Scan SD card in headless mode
+  tprs /path/to/photos --headless --output /tmp/xmp # Headless with custom output directory
+  tprs /path/to/photos --headless --model qwen2-vl-7b # Headless with specific model
         """,
     )
 
@@ -40,7 +42,7 @@ Examples:
         "directory",
         type=Path,
         nargs='?',
-        help="Directory to scan for JPEG photos (e.g., SD card mount point)",
+        help="Directory to scan for JPEG photos (optional in GUI mode, required in headless mode)",
     )
 
     parser.add_argument(
@@ -71,9 +73,9 @@ Examples:
     )
 
     parser.add_argument(
-        "--gui",
+        "--headless",
         action="store_true",
-        help="Show progress in a GUI window",
+        help="Run in headless mode without GUI (default is GUI mode)",
     )
 
     args = parser.parse_args()
@@ -81,15 +83,16 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    if args.gui:
+    # Default to GUI mode unless --headless is specified
+    if not args.headless:
         from tvas.tprs_ui import main as ui_main
         app = ui_main(args.directory, args.output, args.model)
         app.main_loop()
         sys.exit(0)
 
-    # Check directory exists (required for non-GUI mode)
+    # Check directory exists (required for headless mode)
     if not args.directory:
-        logger.error("Directory argument is required for non-GUI mode")
+        logger.error("Directory argument is required for headless mode")
         parser.print_help()
         sys.exit(1)
     
