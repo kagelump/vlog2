@@ -148,6 +148,7 @@ class TprsStatusApp(toga.App):
                 logger.info(f"Selected folder: {self.directory}")
         except Exception as e:
             logger.error(f"Error selecting folder: {e}")
+            self.status_label.text = f"Error selecting folder. Please try again."
     
     async def start_analysis(self, widget):
         """Start the analysis when user clicks the button."""
@@ -163,8 +164,16 @@ class TprsStatusApp(toga.App):
         self.start_button.enabled = False
         self.folder_button.enabled = False
         
-        # Start processing
-        await self.run_analysis(widget)
+        try:
+            # Start processing
+            await self.run_analysis(widget)
+        except Exception as e:
+            logger.error(f"Unexpected error during analysis: {e}")
+            self.status_label.text = f"Analysis failed: {e}"
+            # Ensure buttons are re-enabled even on unexpected errors
+            self.start_button.enabled = True
+            self.folder_button.enabled = True
+            self.is_running = False
 
     async def run_analysis(self, widget):
         """Run the analysis in a background thread."""
