@@ -34,11 +34,14 @@ class PhotoAnalysis:
 
     photo_path: Path
     rating: int  # 1-5 stars
+    rating_reason: str
     keywords: list[str]  # 5 keywords
     description: str  # Caption
     primary_subject: Optional[str] = None
     primary_subject_bounding_box: Optional[list[int]] = None
     raw_response: Optional[str] = None
+    best_in_burst: bool = False
+    blur_level: int = 0  # 0 SHARP 1 MINOR_BLURRY 2 VERY_BLURRY
 
 
 def find_jpeg_photos(directory: Path) -> list[Path]:
@@ -260,6 +263,17 @@ def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
         return None
 
 
+def expand_bbox(bbox: list[int]) -> list[int]:
+  x1, y1, x2, y2 = bbox
+  height = y2 - y1
+
+  return [
+      max(0, x1 - 100),
+      max(y1 - height, 0),
+      min(x2 + 100, 1000),
+      y2]
+
+
 def analyze_photo_vlm(
     photo_path: Path,
     model,
@@ -280,6 +294,7 @@ def analyze_photo_vlm(
     # Resize image if needed
     temp_path = resize_image(photo_path)
     image_path_str = str(temp_path) if temp_path else str(photo_path)
+    blur_level_int = 0
 
     try:
         # Single prompt for JSON output
@@ -296,7 +311,7 @@ def analyze_photo_vlm(
             formatted_prompt,
             [image_path_str],
             verbose=False,
-            max_tokens=500,
+            max_tokens=1000,
         )
         
         # Handle GenerationResult object
@@ -327,9 +342,10 @@ def analyze_photo_vlm(
                 "EXCELLENT": 5
             }
             rating = rating_map.get(rating_str, 3)
+            rating_reason = data.get("rating_reason", "N/A")
             
             primary_subject = data.get("primary_subject")
-            primary_subject_bounding_box = data.get("primary_subject_bounding_box")
+            primary_subject_bounding_box = expand_bbox(data.get("primary_subject_bounding_box"))
 
             keywords = data.get("keywords", [])
             if not isinstance(keywords, list):
@@ -378,7 +394,7 @@ def analyze_photo_vlm(
                             formatted_subject_prompt,
                             [str(final_crop_path)],
                             verbose=False,
-                            max_tokens=50,
+                            max_tokens=100,
                         )
                         
                         if hasattr(subject_response, "text"):
@@ -398,11 +414,15 @@ def analyze_photo_vlm(
                             blur_level = subject_data.get("blur_level", "SHARP")
                             
                             if blur_level == "VERY_BLURRY":
-                                logger.info(f"Subject '{primary_subject}' detected as VERY_BLURRY. Downgrading rating to 1.")
+                                rating_reason += f"BUT Subject '{primary_subject}' detected as VERY_BLURRY. Downgrading rating to 1."
+                                logger.info(rating_reason)
                                 rating = 1
+                                blur_level_int = 2
                             elif blur_level == "MINOR_BLURRY":
-                                logger.info(f"Subject '{primary_subject}' detected as MINOR_BLURRY. Reducing rating by 1.")
+                                rating_reason += f"BUT Subject '{primary_subject}' detected as MINOR_BLURRY. Reducing rating by 1."
+                                logger.info(rating_reason)
                                 rating = max(2, rating - 1)
+                                blur_level_int = 1
                                 
                         except json.JSONDecodeError:
                             logger.warning(f"Failed to parse subject analysis response: {subject_text}")
@@ -425,20 +445,23 @@ def analyze_photo_vlm(
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing failed: {e}. Response: {response_text}")
             # Fallback
-            rating = 3
-            keywords = ["photo", "image", "travel", "memory", "capture"]
-            description = "Photo from travel collection."
+            rating = 1
+            rating_reason = "N/A"
+            keywords = ["failed"]
+            description = "Failed analysis."
             primary_subject = None
             primary_subject_bounding_box = None
             
         return PhotoAnalysis(
             photo_path=photo_path,
             rating=rating,
+            rating_reason=rating_reason,
             keywords=keywords,
             description=description,
             primary_subject=primary_subject,
             primary_subject_bounding_box=primary_subject_bounding_box,
             raw_response=response_text,
+            blur_level=blur_level_int,
         )
 
     except Exception as e:
@@ -659,7 +682,10 @@ def select_best_in_burst(
             data = json.loads(clean_text)
             best_index = int(data.get("best_index", 0))
             if 0 <= best_index < len(candidates):
-                return candidates[best_index]
+                best = candidates[best_index]
+                best.rating_reason += f"\nBest reason: {data.get("reason", "N/A")}"
+                best.best_in_burst = True
+                return best
         except Exception as e:
             logger.warning(f"Failed to parse burst selection response: {e}")
             

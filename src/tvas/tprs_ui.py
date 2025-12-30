@@ -84,7 +84,7 @@ class TprsStatusApp(toga.App):
             "Start Analysis",
             on_press=self.start_analysis,
             enabled=self.directory is not None,
-            style=Pack(padding=(0, 5))
+            style=Pack(padding=(0, 5), color='blue')
         )
         
         folder_row = toga.Box(
@@ -350,7 +350,12 @@ class TprsStatusApp(toga.App):
                         bottom = int((ymax / 1000) * height)
                         
                         # Draw red rectangle
-                        draw.rectangle([left, top, right, bottom], outline="red", width=5)
+                        outline_color = "green"
+                        if analysis.blur_level == 1:
+                            outline_color = "yellow"
+                        elif analysis.blur_level == 2:
+                            outline_color = "red"
+                        draw.rectangle([left, top, right, bottom], outline=outline_color, width=5)
                         
                         # Save to temp file
                         tf = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
@@ -377,12 +382,13 @@ class TprsStatusApp(toga.App):
             logger.error(f"Failed to load image for details: {e}")
 
         # Update details panel
-        details_text = f"Rating: {analysis.rating} Stars\n\n"
+        details_text = f"Rating: {analysis.rating} Stars\n"
+        details_text += f"Rating reason: {analysis.rating_reason}\n\n"
         details_text += f"Subject: {analysis.primary_subject}\n\n"
         details_text += f"Keywords:\n{', '.join(analysis.keywords)}\n\n"
         details_text += f"Description:\n{analysis.description}\n\n"
         if analysis.raw_response:
-             details_text += f"Raw Response:\n{analysis.raw_response[:500]}..."
+             details_text += f"Raw Response:\n{analysis.raw_response}"
 
         self.details_content.value = details_text
         
