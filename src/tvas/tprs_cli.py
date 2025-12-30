@@ -79,6 +79,10 @@ Examples:
         help="Run in headless mode without GUI (default is GUI mode)",
     )
 
+    # Filter out macOS process serial number argument
+    if sys.platform == 'darwin':
+        sys.argv = [arg for arg in sys.argv if not arg.startswith('-psn_')]
+
     args = parser.parse_args()
 
     if args.verbose:

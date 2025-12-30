@@ -44,10 +44,34 @@ pyinstaller --noconfirm --clean \
 HF_CACHE=$(python -c "from huggingface_hub import snapshot_download; import os; print(os.path. dirname(snapshot_download('mlx-community/Qwen3-VL-8B-Instruct-8bit', cache_dir=None)))")
 echo "Found HuggingFace cache at: $HF_CACHE"
 
+# Generate ICNS file
+echo -e "${GREEN}Generating App Icon...${NC}"
+mkdir -p "$BUILD_DIR/icons.iconset"
+# Convert WebP to PNG using Pillow
+python -c "from PIL import Image; Image.open('assets/tprslogo.webp').save('$BUILD_DIR/logo.png')"
+
+# Create various sizes for the iconset
+sips -z 16 16     "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_16x16.png" > /dev/null
+sips -z 32 32     "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_16x16@2x.png" > /dev/null
+sips -z 32 32     "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_32x32.png" > /dev/null
+sips -z 64 64     "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_32x32@2x.png" > /dev/null
+sips -z 128 128   "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_128x128.png" > /dev/null
+sips -z 256 256   "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_128x128@2x.png" > /dev/null
+sips -z 256 256   "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_256x256.png" > /dev/null
+sips -z 512 512   "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_256x256@2x.png" > /dev/null
+sips -z 512 512   "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_512x512.png" > /dev/null
+sips -z 1024 1024 "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_512x512@2x.png" > /dev/null
+
+# Convert iconset to icns
+iconutil -c icns "$BUILD_DIR/icons.iconset" -o "$BUILD_DIR/tprs.icns"
+
 # Build TPRS (Photo Rating CLI)
 echo -e "${GREEN}Building TPRS executable...${NC}"
 pyinstaller --noconfirm --clean \
     --name tprs \
+    --windowed \
+    --icon "$BUILD_DIR/tprs.icns" \
+    --osx-bundle-identifier=com.kagelump.tprs \
     --add-data "src/tvas/prompts/*.txt:tvas/prompts" \
     --add-data "$MLX_METALLIB:." \
     --collect-all mlx \
@@ -64,7 +88,7 @@ mkdir -p "$DIST_NAME"
 
 # Copy executables to distribution folder
 cp -r dist/tvas "$DIST_NAME/"
-cp -r dist/tprs "$DIST_NAME/"
+cp -r dist/tprs.app "$DIST_NAME/"
 
 # Copy README
 cp README.md "$DIST_NAME/"
@@ -75,11 +99,11 @@ cat << EOF > "$DIST_NAME/install.sh"
 # Simple install script to add to path or just run
 echo "You can run the tools directly from this folder:"
 echo "  ./tvas/tvas"
-echo "  ./tprs/tprs"
+echo "  open ./tprs.app"
 echo ""
 echo "To install to /usr/local/bin (requires sudo):"
 echo "  sudo ln -sf \$(pwd)/tvas/tvas /usr/local/bin/tvas"
-echo "  sudo ln -sf \$(pwd)/tprs/tprs /usr/local/bin/tprs"
+echo "  sudo ln -sf \$(pwd)/tprs.app/Contents/MacOS/tprs /usr/local/bin/tprs"
 EOF
 chmod +x "$DIST_NAME/install.sh"
 
