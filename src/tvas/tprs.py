@@ -232,11 +232,11 @@ def resize_image(image_path: Path, max_dimension: int = 1024) -> Optional[Path]:
 
 
 def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
-    """Crop image to bounding box. bbox is [ymin, xmin, ymax, xmax] on 0-1000 scale."""
+    """Crop image to bounding box. bbox is [xmin, ymin, xmax, ymax] on 0-1000 scale."""
     try:
         with Image.open(image_path) as img:
             width, height = img.size
-            ymin, xmin, ymax, xmax = bbox
+            xmin, ymin, xmax, ymax = bbox
             
             # Convert 0-1000 scale to pixels
             left = int((xmin / 1000) * width)

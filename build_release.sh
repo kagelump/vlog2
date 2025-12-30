@@ -65,12 +65,15 @@ sips -z 1024 1024 "$BUILD_DIR/logo.png" --out "$BUILD_DIR/icons.iconset/icon_512
 # Convert iconset to icns
 iconutil -c icns "$BUILD_DIR/icons.iconset" -o "$BUILD_DIR/tprs.icns"
 
+# Get absolute path for icon
+ICON_PATH="$(pwd)/$BUILD_DIR/tprs.icns"
+
 # Build TPRS (Photo Rating CLI)
 echo -e "${GREEN}Building TPRS executable...${NC}"
 pyinstaller --noconfirm --clean \
     --name tprs \
     --windowed \
-    --icon "$BUILD_DIR/tprs.icns" \
+    --icon "$ICON_PATH" \
     --osx-bundle-identifier=com.kagelump.tprs \
     --add-data "src/tvas/prompts/*.txt:tvas/prompts" \
     --add-data "$MLX_METALLIB:." \
@@ -89,6 +92,9 @@ mkdir -p "$DIST_NAME"
 # Copy executables to distribution folder
 cp -r dist/tvas "$DIST_NAME/"
 cp -r dist/tprs.app "$DIST_NAME/"
+
+# Force Finder to refresh the icon
+touch "$DIST_NAME/tprs.app"
 
 # Copy README
 cp README.md "$DIST_NAME/"

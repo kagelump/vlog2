@@ -341,7 +341,7 @@ class TprsStatusApp(toga.App):
                         
                         draw = ImageDraw.Draw(img)
                         width, height = img.size
-                        ymin, xmin, ymax, xmax = analysis.primary_subject_bounding_box
+                        xmin, ymin, xmax, ymax = analysis.primary_subject_bounding_box
                         
                         # Convert 0-1000 scale to pixels
                         left = int((xmin / 1000) * width)

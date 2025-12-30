@@ -8,7 +8,7 @@ Analyze this photograph and provide a JSON object with the following fields:
 2. "keywords": A list of exactly 5 keywords describing the image content.
 3. "description": A brief one-sentence caption describing what you see.
 4. "primary_subject": A short phrase identifying the main, sharpest subject in the frame. Ignore blurry background elements.
-5. "primary_subject_bounding_box": The bounding box of the primary subject as [ymin, xmin, ymax, xmax] on a 0-1000 scale.
+5. "primary_subject_bounding_box": The bounding box of the primary subject as [xmin, ymin, xmax, ymax] on a 0-1000 scale.
 
 Example output:
 {
@@ -16,6 +16,6 @@ Example output:
   "keywords": ["sunset", "beach", "ocean", "waves", "sky"],
   "description": "A beautiful sunset over the ocean with waves crashing on the beach.",
   "primary_subject": "sun",
-  "primary_subject_bounding_box": [300, 400, 500, 600]
+  "primary_subject_bounding_box": [400, 300, 600, 500]
 }
 Output only the JSON object.
