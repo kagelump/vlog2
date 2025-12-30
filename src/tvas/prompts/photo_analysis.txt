@@ -1,21 +1,14 @@
 Analyze this photograph and provide a JSON object with the following fields:
-1. "rating": One of the following categories based on technical quality and composition:
-   - "UNUSABLE": (1 Star) Technical failure. Excessive blur on the main subject, severe exposure issues (blown highlights/crushed shadows), or completely blocked view.
-   - "BAD": (2 Stars) Flawed snapshot. Technically usable but unappealing. Poor lighting, awkward cropping, cluttered background, or boring subject matter.
-   - "OK": (3 Stars) Average record shot. Technically correct (sharp, exposed) but lacks artistic intent. Standard eye-level perspective, flat lighting, "tourist snapshot".
-   - "GOOD": (4 Stars) Strong enthusiast photo. Good lighting, clear subject separation, thoughtful composition (rule of thirds, leading lines). A photo worth sharing.
-   - "EXCELLENT": (5 Stars) Professional portfolio quality. Distinct artistic style, dramatic lighting, perfect timing, or unique perspective. Has a "wow" factor.
-2. "keywords": A list of exactly 5 keywords describing the image content.
-3. "description": A brief one-sentence caption describing what you see.
-4. "primary_subject": A short phrase identifying the main, sharpest subject in the frame. Ignore blurry background elements.
-5. "primary_subject_bounding_box": The bounding box of the primary subject as [xmin, ymin, xmax, ymax] on a 0-1000 scale.
+"rating": One of the following categories based on technical quality and composition:
+- "UNUSABLE": (1 Star) Technical failure. Excessive blur on the main subject, severe exposure issues (blown highlights/crushed shadows), or completely blocked view.
+- "BAD": (2 Stars) Flawed snapshot. Technically usable but unappealing. Poor lighting, awkward cropping, cluttered background, or boring subject matter.
+- "OK": (3 Stars) Average record shot. Technically correct (sharp, exposed) but lacks artistic intent. Standard eye-level perspective, flat lighting, "tourist snapshot".
+- "GOOD": (4 Stars) Strong enthusiast photo. Good lighting, clear subject separation, thoughtful composition (rule of thirds, leading lines). A photo worth sharing.
+- "EXCELLENT": (5 Stars) Professional portfolio quality. Distinct artistic style, dramatic lighting, perfect timing, or unique perspective. Has a "wow" factor.
+"rating_reason": Short one sentence description of the reason for the rating.
+"keywords": A list of exactly 5 keywords describing the image content.
+"description": A brief one-sentence caption describing what you see.
+"primary_subject": A short phrase identifying the main, sharpest subject in the frame. Ignore blurry background elements.
+"primary_subject_bounding_box": The bounding box of the primary subject as [xmin, ymin, xmax, ymax] on a 0-1000 scale.
 
-Example output:
-{
-  "rating": "GOOD",
-  "keywords": ["sunset", "beach", "ocean", "waves", "sky"],
-  "description": "A beautiful sunset over the ocean with waves crashing on the beach.",
-  "primary_subject": "sun",
-  "primary_subject_bounding_box": [400, 300, 600, 500]
-}
 Output only the JSON object.
