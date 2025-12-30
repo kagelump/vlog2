@@ -235,7 +235,7 @@ def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
     """Crop image to bounding box. bbox is [xmin, ymin, xmax, ymax] on 0-1000 scale."""
     try:
         with Image.open(image_path) as img:
-            # Apply EXIF orientation to match how the image is displayed
+            # Apply EXIF orientation to ensure bounding box coordinates match VLM analysis
             img = ImageOps.exif_transpose(img)
             
             width, height = img.size

@@ -332,7 +332,7 @@ class TprsStatusApp(toga.App):
             if analysis.primary_subject_bounding_box and len(analysis.primary_subject_bounding_box) == 4:
                 try:
                     with Image.open(abs_path) as img:
-                        # Apply EXIF orientation to match how the image is displayed
+                        # Apply EXIF orientation to ensure bounding box coordinates match VLM analysis
                         img = ImageOps.exif_transpose(img)
                         
                         draw = ImageDraw.Draw(img)
