@@ -7,7 +7,15 @@ Analyze this photograph and provide a JSON object with the following fields:
    - "EXCELLENT": (5 Stars) Professional portfolio quality. Distinct artistic style, dramatic lighting, perfect timing, or unique perspective. Has a "wow" factor.
 2. "keywords": A list of exactly 5 keywords describing the image content.
 3. "description": A brief one-sentence caption describing what you see.
-4. "primary_subject": A short word or phrase identifying the main, sharpest subject in the frame. Ignore blurry background elements.
-5. "primary_subject_bounding_box": The bounding box of the primary subject as [x_min, y_min, x_max, y_max].
+4. "primary_subject": A short phrase identifying the main, sharpest subject in the frame. Ignore blurry background elements.
+5. "primary_subject_bounding_box": The bounding box of the primary subject as [xmin, ymin, xmax, ymax] on a 0-1000 scale.
 
+Example output:
+{
+  "rating": "GOOD",
+  "keywords": ["sunset", "beach", "ocean", "waves", "sky"],
+  "description": "A beautiful sunset over the ocean with waves crashing on the beach.",
+  "primary_subject": "sun",
+  "primary_subject_bounding_box": [400, 300, 600, 500]
+}
 Output only the JSON object.
