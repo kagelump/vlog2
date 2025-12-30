@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 import toga
 from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
@@ -332,12 +332,8 @@ class TprsStatusApp(toga.App):
             if analysis.primary_subject_bounding_box and len(analysis.primary_subject_bounding_box) == 4:
                 try:
                     with Image.open(abs_path) as img:
-                        # Handle EXIF rotation if needed (PIL usually handles it if we use ImageOps.exif_transpose, 
-                        # but for now let's assume basic load. Toga might handle rotation on display, 
-                        # but drawing on raw pixels might mismatch if we don't respect EXIF. 
-                        # However, simple drawing is safer than re-saving with potential rotation loss.)
-                        # Actually, if we save it back, we lose EXIF unless we copy it. 
-                        # Let's just draw on what we have.
+                        # Apply EXIF orientation to ensure pixel data matches bounding box coordinates
+                        img = ImageOps.exif_transpose(img)
                         
                         draw = ImageDraw.Draw(img)
                         width, height = img.size

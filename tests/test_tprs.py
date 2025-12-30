@@ -178,3 +178,4 @@ class TestPhotoAnalysis:
         )
 
         assert analysis.raw_response == "Raw VLM response"
+
