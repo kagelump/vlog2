@@ -334,9 +334,6 @@ class TprsStatusApp(toga.App):
                     with Image.open(abs_path) as img:
                         # Apply EXIF orientation to match how the image is displayed
                         img = ImageOps.exif_transpose(img)
-                        if img is None:
-                            # If exif_transpose returns None, reload the image
-                            img = Image.open(abs_path)
                         
                         draw = ImageDraw.Draw(img)
                         width, height = img.size

@@ -237,9 +237,6 @@ def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
         with Image.open(image_path) as img:
             # Apply EXIF orientation to match how the image is displayed
             img = ImageOps.exif_transpose(img)
-            if img is None:
-                # If exif_transpose returns None, reload the image
-                img = Image.open(image_path)
             
             width, height = img.size
             xmin, ymin, xmax, ymax = bbox
