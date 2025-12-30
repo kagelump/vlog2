@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
@@ -479,6 +480,7 @@ def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = 
     description.set("rdf:about", "")
     description.set("xmlns:xmp", "http://ns.adobe.com/xap/1.0/")
     description.set("xmlns:dc", "http://purl.org/dc/elements/1.1/")
+    description.set("xmlns:tprs", "http://tvas.local/tprs/1.0/")
 
     # Add rating
     rating_elem = ET.SubElement(description, "xmp:Rating")
@@ -498,6 +500,19 @@ def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = 
     li.set("xml:lang", "x-default")
     li.text = analysis.description
 
+    # Add TPRS specific data
+    if analysis.primary_subject:
+        tprs_subject = ET.SubElement(description, "tprs:primary_subject")
+        tprs_subject.text = analysis.primary_subject
+    
+    if analysis.primary_subject_bounding_box:
+        tprs_bbox = ET.SubElement(description, "tprs:primary_subject_bounding_box")
+        tprs_bbox.text = json.dumps(analysis.primary_subject_bounding_box)
+
+    if analysis.raw_response:
+        tprs_raw = ET.SubElement(description, "tprs:raw_response")
+        tprs_raw.text = analysis.raw_response
+
     # Write to file with proper XML formatting
     tree = ET.ElementTree(xmpmeta)
     ET.indent(tree, space="  ")
@@ -511,8 +526,8 @@ def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = 
     return output_path
 
 
-def get_xmp_info(xmp_path: Path) -> tuple[str, list[str]]:
-    """Extract rating and keywords from XMP file."""
+def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
+    """Load PhotoAnalysis from XMP file."""
     try:
         tree = ET.parse(xmp_path)
         root = tree.getroot()
@@ -520,28 +535,62 @@ def get_xmp_info(xmp_path: Path) -> tuple[str, list[str]]:
         namespaces = {
             'xmp': 'http://ns.adobe.com/xap/1.0/',
             'dc': 'http://purl.org/dc/elements/1.1/',
-            'rdf': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+            'rdf': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
+            'tprs': 'http://tvas.local/tprs/1.0/'
         }
         
-        rating = "Unknown"
+        rating = 0
         keywords = []
+        description = ""
+        primary_subject = None
+        primary_subject_bounding_box = None
+        raw_response = None
         
-        # Search for Rating
+        # Rating
         rating_elem = root.find(".//xmp:Rating", namespaces)
-        if rating_elem is not None:
-            rating = rating_elem.text
+        if rating_elem is not None and rating_elem.text.isdigit():
+            rating = int(rating_elem.text)
             
-        # Search for Keywords
+        # Keywords
         bag = root.find(".//dc:subject/rdf:Bag", namespaces)
         if bag is not None:
             for li in bag.findall("rdf:li", namespaces):
                 if li.text:
                     keywords.append(li.text)
-                    
-        return rating, keywords
+        
+        # Description
+        desc_elem = root.find(".//dc:description/rdf:Alt/rdf:li", namespaces)
+        if desc_elem is not None:
+            description = desc_elem.text or ""
+
+        # TPRS Data
+        ps_elem = root.find(".//tprs:primary_subject", namespaces)
+        if ps_elem is not None:
+            primary_subject = ps_elem.text
+            
+        bbox_elem = root.find(".//tprs:primary_subject_bounding_box", namespaces)
+        if bbox_elem is not None and bbox_elem.text:
+            try:
+                primary_subject_bounding_box = json.loads(bbox_elem.text)
+            except:
+                pass
+                
+        raw_elem = root.find(".//tprs:raw_response", namespaces)
+        if raw_elem is not None:
+            raw_response = raw_elem.text
+
+        return PhotoAnalysis(
+            photo_path=photo_path,
+            rating=rating,
+            keywords=keywords,
+            description=description,
+            primary_subject=primary_subject,
+            primary_subject_bounding_box=primary_subject_bounding_box,
+            raw_response=raw_response
+        )
     except Exception as e:
         logger.warning(f"Failed to parse XMP {xmp_path}: {e}")
-        return "Error", []
+        return PhotoAnalysis(photo_path, 0, [], f"Error loading XMP: {e}")
 
 
 def select_best_in_burst(
@@ -633,6 +682,7 @@ def process_photos_batch(
     model_name: str = DEFAULT_VLM_MODEL,
     output_dir: Optional[Path] = None,
     status_callback: Optional[Callable[[int, int, Optional[Path], Optional[PhotoAnalysis], Optional[Path]], None]] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> list[tuple[PhotoAnalysis, Path]]:
     """Process a batch of photos and generate XMP sidecars.
 
@@ -640,7 +690,8 @@ def process_photos_batch(
         photos: List of photo paths to process.
         model_name: mlx-vlm model name.
         output_dir: Optional output directory for XMP files.
-        status_callback: Callback for progress updates (processed, total, current_photo, last_analysis, comparison_photo).
+        status_callback: Callback for progress updates.
+        stop_event: Optional threading.Event to signal cancellation.
 
     Returns:
         List of (PhotoAnalysis, xmp_path) tuples.
@@ -656,17 +707,8 @@ def process_photos_batch(
             xmp_path = photo_path.with_suffix(".xmp")
             
         if xmp_path.exists():
-            rating, keywords = get_xmp_info(xmp_path)
-            logger.info(f"Sidecar exists for {photo_path.name}: rating {rating}, keywords {keywords}")
-            
-            # Reconstruct analysis for summary
-            analysis = PhotoAnalysis(
-                photo_path=photo_path,
-                rating=int(rating) if rating and rating.isdigit() else 0,
-                keywords=keywords,
-                description="Loaded from XMP",
-                raw_response=None
-            )
+            analysis = load_analysis_from_xmp(xmp_path, photo_path)
+            logger.info(f"Sidecar exists for {photo_path.name}: rating {analysis.rating}, keywords {analysis.keywords}")
             results.append((analysis, xmp_path))
         else:
             photos_to_process.append(photo_path)
@@ -708,10 +750,17 @@ def process_photos_batch(
     burst_iterator = generate_bursts(photos_to_process, model, processor, config, comparison_callback=comparison_cb)
     
     for i, burst in enumerate(burst_iterator):
+        if stop_event and stop_event.is_set():
+            logger.info("Processing cancelled by user.")
+            break
+
         logger.info(f"Processing burst {i + 1} ({len(burst)} photos)")
         
         burst_analyses = []
         for photo_path in burst:
+            if stop_event and stop_event.is_set():
+                break
+
             # Notify start
             if status_callback:
                 try:
