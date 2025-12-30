@@ -90,3 +90,7 @@ venv.bak/
 
 # Logs
 *.log
+
+# Test files
+test_bbox_fix.py
+test_exif_rotation.py

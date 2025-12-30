@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional, Iterator, Callable, Any
 from xml.etree import ElementTree as ET
 
-from PIL import Image, ExifTags
+from PIL import Image, ImageOps, ExifTags
 
 from tvas import load_prompt, DEFAULT_VLM_MODEL
 
@@ -235,6 +235,12 @@ def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
     """Crop image to bounding box. bbox is [xmin, ymin, xmax, ymax] on 0-1000 scale."""
     try:
         with Image.open(image_path) as img:
+            # Apply EXIF orientation to match how the image is displayed
+            img = ImageOps.exif_transpose(img)
+            if img is None:
+                # If exif_transpose returns None, reload the image
+                img = Image.open(image_path)
+            
             width, height = img.size
             xmin, ymin, xmax, ymax = bbox
             
