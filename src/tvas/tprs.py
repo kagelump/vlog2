@@ -528,6 +528,10 @@ def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = 
         tprs_subject = ET.SubElement(description, "tprs:primary_subject")
         tprs_subject.text = analysis.primary_subject
     
+    if analysis.rating_reason:
+        tprs_rating_reason = ET.SubElement(description, "tprs:rating_reason")
+        tprs_rating_reason.text = analysis.rating_reason
+    
     if analysis.primary_subject_bounding_box:
         tprs_bbox = ET.SubElement(description, "tprs:primary_subject_bounding_box")
         tprs_bbox.text = json.dumps(analysis.primary_subject_bounding_box)
@@ -566,6 +570,7 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
         keywords = []
         description = ""
         primary_subject = None
+        rating_reason = "N/A"
         primary_subject_bounding_box = None
         raw_response = None
         
@@ -590,6 +595,10 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
         ps_elem = root.find(".//tprs:primary_subject", namespaces)
         if ps_elem is not None:
             primary_subject = ps_elem.text
+        
+        rating_reason_elem = root.find(".//tprs:rating_reason", namespaces)
+        if rating_reason_elem is not None:
+            rating_reason = rating_reason_elem.text or "N/A"
             
         bbox_elem = root.find(".//tprs:primary_subject_bounding_box", namespaces)
         if bbox_elem is not None and bbox_elem.text:
@@ -605,6 +614,7 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
         return PhotoAnalysis(
             photo_path=photo_path,
             rating=rating,
+            rating_reason=rating_reason,
             keywords=keywords,
             description=description,
             primary_subject=primary_subject,
@@ -613,7 +623,7 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
         )
     except Exception as e:
         logger.warning(f"Failed to parse XMP {xmp_path}: {e}")
-        return PhotoAnalysis(photo_path, 0, [], f"Error loading XMP: {e}")
+        return PhotoAnalysis(photo_path, 0, "N/A", [], f"Error loading XMP: {e}")
 
 
 def select_best_in_burst(
