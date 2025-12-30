@@ -231,12 +231,31 @@ def resize_image(image_path: Path, max_dimension: int = 1024) -> Optional[Path]:
         return None
 
 
-def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
-    """Crop image to bounding box. bbox is [xmin, ymin, xmax, ymax] on 0-1000 scale."""
+def crop_image(image_path: Path, bbox: list[int], margin_pct: float = 0.2) -> Optional[Path]:
+    """Crop image to bounding box. bbox is [xmin, ymin, xmax, ymax] on 0-1000 scale.
+    
+    Args:
+        image_path: Path to image
+        bbox: [xmin, ymin, xmax, ymax] on 0-1000 scale
+        margin_pct: Percentage of margin to add to each side (default 0.2 = 20%)
+    """
     try:
         with Image.open(image_path) as img:
             width, height = img.size
             xmin, ymin, xmax, ymax = bbox
+            
+            # Calculate margins
+            box_width = xmax - xmin
+            box_height = ymax - ymin
+            
+            margin_x = int(box_width * margin_pct)
+            margin_y = int(box_height * margin_pct)
+            
+            # Apply margins and clamp to 0-1000
+            xmin = max(0, xmin - margin_x)
+            ymin = max(0, ymin - margin_y)
+            xmax = min(1000, xmax + margin_x)
+            ymax = min(1000, ymax + margin_y)
             
             # Convert 0-1000 scale to pixels
             left = int((xmin / 1000) * width)
@@ -285,7 +304,7 @@ def analyze_photo_vlm(
         # Single prompt for JSON output
         json_prompt = load_prompt("photo_analysis.txt")
 
-        logger.debug(f"Analyzing {photo_path.name} with JSON prompt")
+        logger.info(f"Analyzing {photo_path.name} with JSON prompt at {image_path_str}")
         formatted_prompt = apply_chat_template(
             processor, config, json_prompt, num_images=1
         )

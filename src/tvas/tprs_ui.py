@@ -343,6 +343,19 @@ class TprsStatusApp(toga.App):
                         width, height = img.size
                         xmin, ymin, xmax, ymax = analysis.primary_subject_bounding_box
                         
+                        # Apply 20% margin
+                        margin_pct = 0.2
+                        box_width = xmax - xmin
+                        box_height = ymax - ymin
+                        
+                        margin_x = int(box_width * margin_pct)
+                        margin_y = int(box_height * margin_pct)
+                        
+                        xmin = max(0, xmin - margin_x)
+                        ymin = max(0, ymin - margin_y)
+                        xmax = min(1000, xmax + margin_x)
+                        ymax = min(1000, ymax + margin_y)
+                        
                         # Convert 0-1000 scale to pixels
                         left = int((xmin / 1000) * width)
                         top = int((ymin / 1000) * height)
