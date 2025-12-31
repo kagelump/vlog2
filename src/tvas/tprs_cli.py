@@ -8,6 +8,7 @@ import argparse
 import logging
 import multiprocessing
 import sys
+import urllib.request
 from pathlib import Path
 
 from tvas import DEFAULT_VLM_MODEL
@@ -22,6 +23,15 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def check_lmstudio_running():
+    """Check if LM Studio is running locally."""
+    try:
+        with urllib.request.urlopen("http://localhost:1234/v1/models", timeout=0.2) as response:
+            return response.status == 200
+    except Exception:
+        return False
 
 
 def main():
@@ -103,6 +113,12 @@ Examples:
         sys.argv = [arg for arg in sys.argv if not arg.startswith('-psn_')]
 
     args = parser.parse_args()
+
+    # Auto-detect LM Studio
+    if not args.lmstudio and not args.api_base:
+        if check_lmstudio_running():
+            logger.info("Auto-detected LM Studio at http://localhost:1234. Enabling --lmstudio mode.")
+            args.lmstudio = True
 
     if args.lmstudio:
         if args.api_base is None:

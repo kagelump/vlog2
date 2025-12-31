@@ -37,13 +37,7 @@ class GuiLogHandler(logging.Handler):
 
     def update_log(self, msg):
         if hasattr(self.app, "log_label"):
-            # Truncate to prevent window expansion
-            # Estimate max chars based on window width (approx 7px per char for monospace 10)
-            try:
-                window_width = self.app.main_window.size[0]
-                max_chars = int(window_width / 7) - 30  # subtract some padding
-            except:
-                max_chars = 100
+            max_chars = 120
             
             if len(msg) > max_chars:
                 msg = msg[:max_chars-3] + "..."
@@ -203,7 +197,12 @@ class TprsStatusApp(toga.App):
         # --- Header: Progress & Logs ---
         self.progress_bar = toga.ProgressBar(max=100, value=0, style=Pack(padding=(0, 10), flex=1))
         self.status_label = toga.Label("Ready to start", style=Pack(padding=(5, 10)))
-        self.log_label = toga.Label("Select a folder and click Start Analysis", style=Pack(padding=(0, 10), font_family="monospace", font_size=10, flex=1))
+        self.log_label = toga.Label(
+            "Select a folder and click Start Analysis", 
+            style=Pack(padding=(0, 10), 
+                       font_family="monospace", 
+                       font_size=10, 
+                       flex=1))
         
         self.resume_button = toga.Button(
             "Resume Live View",
