@@ -8,6 +8,7 @@ import logging
 import threading
 import functools
 import tempfile
+import io
 from pathlib import Path
 from typing import Optional
 
@@ -557,26 +558,50 @@ class TprsStatusApp(toga.App):
     def add_recent_photo(self, analysis: PhotoAnalysis):
         """Add a thumbnail to the recent photos strip."""
         # Create a box for the thumbnail
-        thumb_box = toga.Box(style=Pack(direction=COLUMN, width=100, padding=5))
+        thumb_box = toga.Box(style=Pack(direction=COLUMN, width=120, padding=5))
         
-        view_widget = None
         try:
-            abs_path = str(analysis.photo_path.resolve())
-            # Use Button with Icon to make it clickable
-            icon = toga.Icon(abs_path)
-            view_widget = toga.Button(
-                "", 
-                icon=icon,
+            # Create thumbnail image
+            with Image.open(analysis.photo_path) as img:
+                img.thumbnail((200, 200))
+                img_byte_arr = io.BytesIO()
+                img.save(img_byte_arr, format=img.format or 'JPEG')
+                toga_img = toga.Image(src=img_byte_arr.getvalue())
+            
+            # Toga buttons don't support large icons, so we use an ImageView for the thumbnail
+            # and a separate button for the action.
+            image_view = toga.ImageView(image=toga_img, style=Pack(height=80, width=100))
+            
+            if "BestInBurst" in analysis.keywords:
+                # Wrap in red box for border effect
+                border_box = toga.Box(style=Pack(background_color="red", padding=2))
+                border_box.add(image_view)
+                thumb_box.add(border_box)
+            else:
+                thumb_box.add(image_view)
+            
+            # Add View button below
+            view_btn = toga.Button(
+                "View", 
                 on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
-                style=Pack(height=80, width=100)
+                style=Pack(width=100)
             )
+            thumb_box.add(view_btn)
+            
         except Exception as e:
-            logger.warning(f"Failed to create thumbnail button: {e}")
+            logger.warning(f"Failed to create thumbnail view: {e}")
+            # Fallback to text button
             view_widget = toga.Button(
                 "View", 
                 on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
                 style=Pack(height=80, width=100)
             )
+            if "BestInBurst" in analysis.keywords:
+                border_box = toga.Box(style=Pack(background_color="red", padding=2))
+                border_box.add(view_widget)
+                thumb_box.add(border_box)
+            else:
+                thumb_box.add(view_widget)
             
         rating_label = toga.Label(f"{analysis.rating} ★", style=Pack(text_align=CENTER))
         
@@ -585,14 +610,6 @@ class TprsStatusApp(toga.App):
             subject_text = subject_text[:13] + ".."
         subject_label = toga.Label(subject_text, style=Pack(text_align=CENTER, font_size=10))
         
-        if "BestInBurst" in analysis.keywords:
-            # Wrap in red box for border effect
-            border_box = toga.Box(style=Pack(background_color="red", padding=2))
-            border_box.add(view_widget)
-            thumb_box.add(border_box)
-        else:
-            thumb_box.add(view_widget)
-
         thumb_box.add(rating_label)
         thumb_box.add(subject_label)
         
