@@ -106,7 +106,7 @@ For the best performance, we recommend using LM Studio to host the vision model 
 2.  **Download Model**: Search for `qwen 3 vl 8B` in LM Studio and download it.
 3.  **Start Server**:
     *   Go to the "Developer" (Server) tab.
-    *   Load the `qwen 3 vl 8B` model.
+    *   Load the `qwen 3 vl 8B` model.  This may take some time to download.
     *   Turn on "Start Server" (ensure it's on `http://localhost:1234`).
 4.  **Run TPRS**:
 
