@@ -61,6 +61,19 @@ Examples:
     )
 
     parser.add_argument(
+        "--api-base",
+        type=str,
+        help="Base URL for custom API endpoint (e.g., http://localhost:1234/v1). If set, local MLX model is skipped.",
+    )
+
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default="lm-studio",
+        help="API key for custom endpoint (default: lm-studio)",
+    )
+
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -79,11 +92,23 @@ Examples:
         help="Run in headless mode without GUI (default is GUI mode)",
     )
 
+    parser.add_argument(
+        "--lmstudio",
+        action="store_true",
+        help="Use LM Studio local server (sets api-base and model)",
+    )
+
     # Filter out macOS process serial number argument
     if sys.platform == 'darwin':
         sys.argv = [arg for arg in sys.argv if not arg.startswith('-psn_')]
 
     args = parser.parse_args()
+
+    if args.lmstudio:
+        if args.api_base is None:
+            args.api_base = "http://localhost:1234/v1"
+        if args.model == DEFAULT_VLM_MODEL:
+            args.model = "qwen/qwen3-vl-8b"
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -97,7 +122,7 @@ Examples:
     # Default to GUI mode unless --headless is specified
     if not args.headless:
         from tvas.tprs_ui import main as ui_main
-        app = ui_main(args.directory, args.output, args.model)
+        app = ui_main(args.directory, args.output, args.model, args.api_base, args.api_key)
         app.main_loop()
         sys.exit(0)
 
@@ -135,7 +160,13 @@ Examples:
     # Process photos
     logger.info("Starting photo analysis...")
     try:
-        results = process_photos_batch(photos, args.model, args.output)
+        results = process_photos_batch(
+            photos, 
+            args.model, 
+            args.output,
+            api_base=args.api_base,
+            api_key=args.api_key
+        )
 
         logger.info("=" * 60)
         logger.info("Processing complete!")

@@ -10,6 +10,9 @@ import logging
 import os
 import tempfile
 import threading
+import base64
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,12 +92,71 @@ def get_capture_time(image_path: Path) -> datetime:
         return datetime.fromtimestamp(image_path.stat().st_mtime)
 
 
+def call_vlm_api(
+    prompt: str,
+    image_paths: list[Path],
+    api_base: str,
+    api_key: str,
+    model_name: str = "local-model",
+    max_tokens: int = 1000,
+    temperature: float = 0.7
+) -> Optional[str]:
+    """Call a VLM API (OpenAI compatible)."""
+    try:
+        messages_content = [{"type": "text", "text": prompt}]
+        
+        for image_path in image_paths:
+            with open(image_path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+                messages_content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
+                })
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        
+        payload = {
+            "model": model_name, 
+            "messages": [
+                {
+                    "role": "user",
+                    "content": messages_content
+                }
+            ],
+            "max_tokens": max_tokens,
+            "temperature": temperature
+        }
+        
+        req = urllib.request.Request(
+            f"{api_base}/chat/completions",
+            data=json.dumps(payload).encode('utf-8'),
+            headers=headers,
+            method="POST"
+        )
+        
+        with urllib.request.urlopen(req) as response:
+            response_data = json.loads(response.read().decode('utf-8'))
+            return response_data['choices'][0]['message']['content']
+
+    except Exception as e:
+        logger.error(f"API call failed: {e}")
+        return None
+
+
 def are_photos_in_same_burst(
     photo1: Path,
     photo2: Path,
-    model,
-    processor,
-    config
+    model=None,
+    processor=None,
+    config=None,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_name: str = "local-model"
 ) -> bool:
     """Use VLM to determine if two photos belong to the same burst."""
     p1_resized = None
@@ -105,29 +167,42 @@ def are_photos_in_same_burst(
         p2_resized = resize_image(photo2, max_dimension=512)
         
         image_paths = [
-            str(p1_resized if p1_resized else photo1),
-            str(p2_resized if p2_resized else photo2)
+            p1_resized if p1_resized else photo1,
+            p2_resized if p2_resized else photo2
         ]
         
         prompt = load_prompt("burst_similarity.txt")
 
-        formatted_prompt = apply_chat_template(
-            processor, config, prompt, num_images=2
-        )
-        
-        response = generate(
-            model,
-            processor,
-            formatted_prompt,
-            image_paths,
-            verbose=False,
-            max_tokens=50,
-        )
-        
-        if hasattr(response, "text"):
-            text = response.text
+        if api_base:
+            text = call_vlm_api(
+                prompt=prompt,
+                image_paths=image_paths,
+                api_base=api_base,
+                api_key=api_key,
+                model_name=model_name,
+                max_tokens=50
+            )
+            if not text:
+                return False
         else:
-            text = str(response)
+            image_paths_str = [str(p) for p in image_paths]
+            formatted_prompt = apply_chat_template(
+                processor, config, prompt, num_images=2
+            )
+            
+            response = generate(
+                model,
+                processor,
+                formatted_prompt,
+                image_paths_str,
+                verbose=False,
+                max_tokens=50,
+            )
+            
+            if hasattr(response, "text"):
+                text = response.text
+            else:
+                text = str(response)
             
         # Clean JSON
         clean_text = text.strip()
@@ -158,11 +233,14 @@ def are_photos_in_same_burst(
 
 def generate_bursts(
     photos: list[Path], 
-    model,
-    processor,
-    config,
+    model=None,
+    processor=None,
+    config=None,
     threshold_minutes: float = 5.0,
-    comparison_callback: Optional[Callable[[Path, Path], None]] = None
+    comparison_callback: Optional[Callable[[Path, Path], None]] = None,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_name: str = "local-model"
 ) -> Iterator[list[Path]]:
     """Yield bursts of photos based on capture time and visual similarity."""
     if not photos:
@@ -195,7 +273,10 @@ def generate_bursts(
             logger.info(f"Checking burst similarity: {prev_photo.name} vs {curr_photo.name} (diff: {time_diff:.1f}m)")
             if comparison_callback:
                 comparison_callback(prev_photo, curr_photo)
-            is_same_burst = are_photos_in_same_burst(prev_photo, curr_photo, model, processor, config)
+            is_same_burst = are_photos_in_same_burst(
+                prev_photo, curr_photo, model, processor, config,
+                api_base=api_base, api_key=api_key, model_name=model_name
+            )
             
         if is_same_burst:
             current_burst.append(curr_photo)
@@ -274,102 +355,158 @@ def expand_bbox(bbox: list[int]) -> list[int]:
       y2]
 
 
-def analyze_photo_vlm(
+def parse_analysis_response(response_text: str, photo_path: Path) -> Optional[PhotoAnalysis]:
+    """Parse JSON response from VLM."""
+    # Clean up response text (remove markdown code blocks if present)
+    clean_text = response_text.strip()
+    if clean_text.startswith("```json"):
+        clean_text = clean_text[7:]
+    if clean_text.startswith("```"):
+        clean_text = clean_text[3:]
+    if clean_text.endswith("```"):
+        clean_text = clean_text[:-3]
+    clean_text = clean_text.strip()
+
+    try:
+        data = json.loads(clean_text)
+        
+        rating_str = str(data.get("rating", "OK")).upper()
+        rating_map = {
+            "UNUSABLE": 1,
+            "BAD": 2,
+            "OK": 3,
+            "GOOD": 4,
+            "EXCELLENT": 5
+        }
+        rating = rating_map.get(rating_str, 3)
+        rating_reason = data.get("rating_reason", "N/A")
+        
+        primary_subject = data.get("primary_subject")
+        primary_subject_bounding_box = None
+        if data.get("primary_subject_bounding_box"):
+             primary_subject_bounding_box = data.get("primary_subject_bounding_box")
+
+        keywords = data.get("keywords", [])
+        if not isinstance(keywords, list):
+            keywords = str(keywords).split(",")
+        
+        # Ensure 5 keywords
+        keywords = [str(k).strip() for k in keywords if str(k).strip()]
+        
+        # Prepend primary_subject if available
+        if primary_subject:
+            ps_clean = str(primary_subject).strip()
+            if ps_clean:
+                if ps_clean in keywords:
+                    keywords.remove(ps_clean)
+                keywords.insert(0, ps_clean)
+
+        while len(keywords) < 5:
+            keywords.append("general")
+        keywords = keywords[:5]
+        
+        description = str(data.get("description", "Photo from travel collection."))
+        if len(description) > 300:
+            description = description[:297] + "..."
+            
+        return PhotoAnalysis(
+            photo_path=photo_path,
+            rating=rating,
+            rating_reason=rating_reason,
+            keywords=keywords,
+            description=description,
+            primary_subject=primary_subject,
+            primary_subject_bounding_box=primary_subject_bounding_box,
+            raw_response=response_text
+        )
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON response for {photo_path}: {e}")
+        logger.debug(f"Raw response: {response_text}")
+        return None
+    except Exception as e:
+        logger.error(f"Error processing analysis for {photo_path}: {e}")
+        return None
+
+
+def analyze_photo(
     photo_path: Path,
-    model,
-    processor,
-    config,
+    model=None,
+    processor=None,
+    config=None,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_name: str = "local-model"
 ) -> Optional[PhotoAnalysis]:
-    """Analyze a photo using Vision Language Model via mlx-vlm.
+    """Analyze a photo using Vision Language Model via mlx-vlm or API.
 
     Args:
         photo_path: Path to the photo file.
         model: Loaded mlx-vlm model.
         processor: Loaded processor.
         config: Loaded config.
+        api_base: Optional API base URL.
+        api_key: Optional API key.
+        model_name: Model name for API.
 
     Returns:
         PhotoAnalysis with rating, keywords, and description, or None if analysis fails.
     """
     # Resize image if needed
     temp_path = resize_image(photo_path)
-    image_path_str = str(temp_path) if temp_path else str(photo_path)
+    image_path = temp_path if temp_path else photo_path
     blur_level_int = 0
 
     try:
         # Single prompt for JSON output
         json_prompt = load_prompt("photo_analysis.txt")
 
-        logger.debug(f"Analyzing {photo_path.name} with JSON prompt")
-        formatted_prompt = apply_chat_template(
-            processor, config, json_prompt, num_images=1
-        )
-
-        response = generate(
-            model,
-            processor,
-            formatted_prompt,
-            [image_path_str],
-            verbose=False,
-            max_tokens=1000,
-        )
-        
-        # Handle GenerationResult object
-        if hasattr(response, "text"):
-            response_text = response.text
+        if api_base:
+            response_text = call_vlm_api(
+                prompt=json_prompt,
+                image_paths=[image_path],
+                api_base=api_base,
+                api_key=api_key,
+                model_name=model_name,
+                max_tokens=1000
+            )
+            if not response_text:
+                return None
         else:
-            response_text = str(response)
+            image_path_str = str(image_path)
+            logger.debug(f"Analyzing {photo_path.name} with JSON prompt")
+            formatted_prompt = apply_chat_template(
+                processor, config, json_prompt, num_images=1
+            )
 
-        # Clean up response text (remove markdown code blocks if present)
-        clean_text = response_text.strip()
-        if clean_text.startswith("```json"):
-            clean_text = clean_text[7:]
-        if clean_text.startswith("```"):
-            clean_text = clean_text[3:]
-        if clean_text.endswith("```"):
-            clean_text = clean_text[:-3]
-        clean_text = clean_text.strip()
+            response = generate(
+                model,
+                processor,
+                formatted_prompt,
+                [image_path_str],
+                verbose=False,
+                max_tokens=1000,
+            )
+            
+            # Handle GenerationResult object
+            if hasattr(response, "text"):
+                response_text = response.text
+            else:
+                response_text = str(response)
+
+        analysis = parse_analysis_response(response_text, photo_path)
+        if not analysis:
+            return None
+            
+        # Use analysis object directly
+        primary_subject = analysis.primary_subject
+        primary_subject_bounding_box = analysis.primary_subject_bounding_box
+        rating = analysis.rating
+        rating_reason = analysis.rating_reason
+        keywords = analysis.keywords
+        description = analysis.description
+        raw_response = analysis.raw_response
 
         try:
-            data = json.loads(clean_text)
-            
-            rating_str = str(data.get("rating", "OK")).upper()
-            rating_map = {
-                "UNUSABLE": 1,
-                "BAD": 2,
-                "OK": 3,
-                "GOOD": 4,
-                "EXCELLENT": 5
-            }
-            rating = rating_map.get(rating_str, 3)
-            rating_reason = data.get("rating_reason", "N/A")
-            
-            primary_subject = data.get("primary_subject")
-            primary_subject_bounding_box = expand_bbox(data.get("primary_subject_bounding_box"))
-
-            keywords = data.get("keywords", [])
-            if not isinstance(keywords, list):
-                keywords = str(keywords).split(",")
-            
-            # Ensure 5 keywords
-            keywords = [str(k).strip() for k in keywords if str(k).strip()]
-            
-            # Prepend primary_subject if available
-            if primary_subject:
-                ps_clean = str(primary_subject).strip()
-                if ps_clean:
-                    if ps_clean in keywords:
-                        keywords.remove(ps_clean)
-                    keywords.insert(0, ps_clean)
-
-            while len(keywords) < 5:
-                keywords.append("general")
-            keywords = keywords[:5]
-            
-            description = str(data.get("description", "Photo from travel collection."))
-            if len(description) > 300:
-                description = description[:297] + "..."
-            
             # Secondary analysis: Check subject sharpness
             if primary_subject and primary_subject_bounding_box and isinstance(primary_subject_bounding_box, list) and len(primary_subject_bounding_box) == 4:
                 logger.debug(f"Performing secondary subject analysis for {primary_subject}")
@@ -384,48 +521,59 @@ def analyze_photo_vlm(
                         subject_prompt_template = load_prompt("subject_sharpness.txt")
                         subject_prompt = subject_prompt_template.format(primary_subject=primary_subject)
                         
-                        formatted_subject_prompt = apply_chat_template(
-                            processor, config, subject_prompt, num_images=1
-                        )
-                        
-                        subject_response = generate(
-                            model,
-                            processor,
-                            formatted_subject_prompt,
-                            [str(final_crop_path)],
-                            verbose=False,
-                            max_tokens=100,
-                        )
-                        
-                        if hasattr(subject_response, "text"):
-                            subject_text = subject_response.text
+                        if api_base:
+                            subject_text = call_vlm_api(
+                                prompt=subject_prompt,
+                                image_paths=[final_crop_path],
+                                api_base=api_base,
+                                api_key=api_key,
+                                model_name=model_name,
+                                max_tokens=100
+                            )
                         else:
-                            subject_text = str(subject_response)
+                            formatted_subject_prompt = apply_chat_template(
+                                processor, config, subject_prompt, num_images=1
+                            )
                             
-                        # Clean JSON
-                        clean_subject = subject_text.strip()
-                        if clean_subject.startswith("```json"): clean_subject = clean_subject[7:]
-                        if clean_subject.startswith("```"): clean_subject = clean_subject[3:]
-                        if clean_subject.endswith("```"): clean_subject = clean_subject[:-3]
-                        clean_subject = clean_subject.strip()
-                        
-                        try:
-                            subject_data = json.loads(clean_subject)
-                            blur_level = subject_data.get("blur_level", "SHARP")
+                            subject_response = generate(
+                                model,
+                                processor,
+                                formatted_subject_prompt,
+                                [str(final_crop_path)],
+                                verbose=False,
+                                max_tokens=100,
+                            )
                             
-                            if blur_level == "VERY_BLURRY":
-                                rating_reason += f"BUT Subject '{primary_subject}' detected as VERY_BLURRY. Downgrading rating to 1."
-                                logger.info(rating_reason)
-                                rating = 1
-                                blur_level_int = 2
-                            elif blur_level == "MINOR_BLURRY":
-                                rating_reason += f"BUT Subject '{primary_subject}' detected as MINOR_BLURRY. Reducing rating by 1."
-                                logger.info(rating_reason)
-                                rating = max(2, rating - 1)
-                                blur_level_int = 1
+                            if hasattr(subject_response, "text"):
+                                subject_text = subject_response.text
+                            else:
+                                subject_text = str(subject_response)
+                            
+                        if subject_text:
+                            # Clean JSON
+                            clean_subject = subject_text.strip()
+                            if clean_subject.startswith("```json"): clean_subject = clean_subject[7:]
+                            if clean_subject.startswith("```"): clean_subject = clean_subject[3:]
+                            if clean_subject.endswith("```"): clean_subject = clean_subject[:-3]
+                            clean_subject = clean_subject.strip()
+                            
+                            try:
+                                subject_data = json.loads(clean_subject)
+                                blur_level = subject_data.get("blur_level", "SHARP")
                                 
-                        except json.JSONDecodeError:
-                            logger.warning(f"Failed to parse subject analysis response: {subject_text}")
+                                if blur_level == "VERY_BLURRY":
+                                    rating_reason += f"BUT Subject '{primary_subject}' detected as VERY_BLURRY. Downgrading rating to 1."
+                                    logger.info(rating_reason)
+                                    rating = 1
+                                    blur_level_int = 2
+                                elif blur_level == "MINOR_BLURRY":
+                                    rating_reason += f"BUT Subject '{primary_subject}' detected as MINOR_BLURRY. Reducing rating by 1."
+                                    logger.info(rating_reason)
+                                    rating = max(2, rating - 1)
+                                    blur_level_int = 1
+                                    
+                            except json.JSONDecodeError:
+                                logger.warning(f"Failed to parse subject analysis response: {subject_text}")
                             
                     except Exception as e:
                         logger.warning(f"Secondary analysis failed: {e}")
@@ -628,9 +776,12 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
 
 def select_best_in_burst(
     burst_analyses: list[PhotoAnalysis],
-    model,
-    processor,
-    config
+    model=None,
+    processor=None,
+    config=None,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model_name: str = "local-model"
 ) -> PhotoAnalysis:
     """Select the best photo from a burst using VLM comparison."""
     # Filter for candidates (rating >= 3)
@@ -656,30 +807,41 @@ def select_best_in_burst(
             # Resize for comparison to save memory and tokens
             resized = resize_image(c.photo_path, max_dimension=512)
             if resized:
-                image_paths.append(str(resized))
+                image_paths.append(resized)
                 temp_files.append(resized)
             else:
-                image_paths.append(str(c.photo_path))
+                image_paths.append(c.photo_path)
         
         prompt = load_prompt("best_in_burst.txt")
 
-        formatted_prompt = apply_chat_template(
-            processor, config, prompt, num_images=len(image_paths)
-        )
-        
-        response = generate(
-            model,
-            processor,
-            formatted_prompt,
-            image_paths,
-            verbose=False,
-            max_tokens=100,
-        )
-        
-        if hasattr(response, "text"):
-            response_text = response.text
+        if api_base:
+            response_text = call_vlm_api(
+                prompt=prompt,
+                image_paths=image_paths,
+                api_base=api_base,
+                api_key=api_key,
+                model_name=model_name,
+                max_tokens=100
+            )
         else:
-            response_text = str(response)
+            image_paths_str = [str(p) for p in image_paths]
+            formatted_prompt = apply_chat_template(
+                processor, config, prompt, num_images=len(image_paths)
+            )
+            
+            response = generate(
+                model,
+                processor,
+                formatted_prompt,
+                image_paths_str,
+                verbose=False,
+                max_tokens=100,
+            )
+            
+            if hasattr(response, "text"):
+                response_text = response.text
+            else:
+                response_text = str(response)
             
         # Clean JSON
         clean_text = response_text.strip()
@@ -719,6 +881,8 @@ def process_photos_batch(
     output_dir: Optional[Path] = None,
     status_callback: Optional[Callable[[int, int, Optional[Path], Optional[PhotoAnalysis], Optional[Path]], None]] = None,
     stop_event: Optional[threading.Event] = None,
+    api_base: Optional[str] = None,
+    api_key: str = "lm-studio",
 ) -> list[tuple[PhotoAnalysis, Path]]:
     """Process a batch of photos and generate XMP sidecars.
 
@@ -728,6 +892,8 @@ def process_photos_batch(
         output_dir: Optional output directory for XMP files.
         status_callback: Callback for progress updates.
         stop_event: Optional threading.Event to signal cancellation.
+        api_base: Optional API base URL. If set, local model is skipped.
+        api_key: API key for custom endpoint.
 
     Returns:
         List of (PhotoAnalysis, xmp_path) tuples.
@@ -763,14 +929,21 @@ def process_photos_batch(
         logger.info("All photos have existing sidecars. No processing needed.")
         return results
 
-    # Load model once
-    try:
-        logger.info(f"Loading mlx-vlm model: {model_name}")
-        model, processor = load(model_name, trust_remote_code=True)
-        config = load_config(model_name, trust_remote_code=True)
-    except Exception as e:
-        logger.error(f"Failed to load model {model_name}: {e}")
-        return results
+    model = None
+    processor = None
+    config = None
+
+    if not api_base:
+        # Load model once
+        try:
+            logger.info(f"Loading mlx-vlm model: {model_name}")
+            model, processor = load(model_name, trust_remote_code=True)
+            config = load_config(model_name, trust_remote_code=True)
+        except Exception as e:
+            logger.error(f"Failed to load model {model_name}: {e}")
+            return results
+    else:
+        logger.info(f"Using custom API endpoint: {api_base}")
 
     # Define comparison callback wrapper
     comparison_cb = None
@@ -783,7 +956,11 @@ def process_photos_batch(
                 status_callback(processed_count, total_photos, curr, None)
 
     # Group into bursts
-    burst_iterator = generate_bursts(photos_to_process, model, processor, config, comparison_callback=comparison_cb)
+    burst_iterator = generate_bursts(
+        photos_to_process, model, processor, config, 
+        comparison_callback=comparison_cb,
+        api_base=api_base, api_key=api_key, model_name=model_name
+    )
     
     for i, burst in enumerate(burst_iterator):
         if stop_event and stop_event.is_set():
@@ -805,7 +982,10 @@ def process_photos_batch(
                     status_callback(processed_count, total_photos, photo_path, None)
 
             # Analyze photo
-            analysis = analyze_photo_vlm(photo_path, model, processor, config)
+            analysis = analyze_photo(
+                photo_path, model, processor, config,
+                api_base=api_base, api_key=api_key, model_name=model_name
+            )
             
             processed_count += 1
             
@@ -831,7 +1011,10 @@ def process_photos_batch(
         # Select best in burst if more than 1 photo
         best_photo = None
         if len(burst_analyses) > 1:
-            best_photo = select_best_in_burst(burst_analyses, model, processor, config)
+            best_photo = select_best_in_burst(
+                burst_analyses, model, processor, config,
+                api_base=api_base, api_key=api_key, model_name=model_name
+            )
             
             # Apply rating constraints
             for analysis in burst_analyses:

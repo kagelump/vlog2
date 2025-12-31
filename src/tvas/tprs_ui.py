@@ -17,7 +17,7 @@ from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
 
 from tvas.tprs import PhotoAnalysis, process_photos_batch, find_jpeg_photos
-from tvas import DEFAULT_VLM_MODEL
+from tvas import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override
 
 # Configure logging to capture everything
 logger = logging.getLogger(__name__)
@@ -36,15 +36,110 @@ class GuiLogHandler(logging.Handler):
 
     def update_log(self, msg):
         if hasattr(self.app, "log_label"):
+            # Truncate to prevent window expansion
+            # Estimate max chars based on window width (approx 7px per char for monospace 10)
+            try:
+                window_width = self.app.main_window.size[0]
+                max_chars = int(window_width / 7) - 30  # subtract some padding
+            except:
+                max_chars = 100
+            
+            if len(msg) > max_chars:
+                msg = msg[:max_chars-3] + "..."
             self.app.log_label.text = msg
 
 
+class SettingsWindow(toga.Window):
+    def __init__(self, app_instance):
+        super().__init__(title="Settings", size=(800, 600))
+        self.app_instance = app_instance
+        self.init_ui()
+
+    def init_ui(self):
+        # General Settings
+        self.model_input = toga.TextInput(value=self.app_instance.model, style=Pack(flex=1))
+        self.api_base_input = toga.TextInput(value=self.app_instance.api_base or "", style=Pack(flex=1))
+        self.api_key_input = toga.TextInput(value=self.app_instance.api_key or "", style=Pack(flex=1))
+
+        general_box = toga.Box(
+            children=[
+                toga.Box(children=[toga.Label("Model:", style=Pack(width=100)), self.model_input], style=Pack(direction=ROW, padding=5)),
+                toga.Box(children=[toga.Label("API Base:", style=Pack(width=100)), self.api_base_input], style=Pack(direction=ROW, padding=5)),
+                toga.Box(children=[toga.Label("API Key:", style=Pack(width=100)), self.api_key_input], style=Pack(direction=ROW, padding=5)),
+            ],
+            style=Pack(direction=COLUMN, padding=10)
+        )
+
+        # Prompts
+        self.prompt_inputs = {}
+        prompt_files = [
+            "photo_analysis.txt",
+            "subject_sharpness.txt",
+            "burst_similarity.txt",
+            "best_in_burst.txt"
+        ]
+        
+        prompt_container = toga.OptionContainer(style=Pack(flex=1))
+        
+        for pf in prompt_files:
+            try:
+                content = load_prompt(pf)
+            except:
+                content = ""
+            text_input = toga.MultilineTextInput(value=content, style=Pack(flex=1, font_family="monospace"))
+            self.prompt_inputs[pf] = text_input
+            # OptionContainer expects content to be a list of OptionItem
+            tab_content = toga.Box(children=[text_input], style=Pack(flex=1, padding=5))
+            prompt_container.content.append(toga.OptionItem(pf.replace(".txt", ""), tab_content))
+
+        # Buttons
+        save_btn = toga.Button("Apply", on_press=self.save_settings, style=Pack(padding=5))
+        close_btn = toga.Button("Close", on_press=self.close_window, style=Pack(padding=5))
+        
+        # Use spacer to align right
+        btn_box = toga.Box(
+            children=[
+                toga.Box(style=Pack(flex=1)),
+                save_btn, 
+                close_btn
+            ], 
+            style=Pack(direction=ROW, padding=10)
+        )
+
+        self.content = toga.Box(
+            children=[
+                toga.Label("General Settings", style=Pack(font_weight='bold', padding=10)),
+                general_box,
+                toga.Label("Prompt Overrides (Session Only)", style=Pack(font_weight='bold', padding=10)),
+                prompt_container,
+                btn_box
+            ],
+            style=Pack(direction=COLUMN)
+        )
+
+    def save_settings(self, widget):
+        self.app_instance.model = self.model_input.value
+        self.app_instance.api_base = self.api_base_input.value if self.api_base_input.value.strip() else None
+        self.app_instance.api_key = self.api_key_input.value
+        
+        for pf, input_widget in self.prompt_inputs.items():
+            set_prompt_override(pf, input_widget.value)
+            
+        self.app_instance.main_window.info_dialog("Settings", "Settings applied for this session.")
+        self.close()
+
+    def close_window(self, widget):
+        self.close()
+
+
 class TprsStatusApp(toga.App):
-    def __init__(self, directory: Optional[Path] = None, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL):
+    def __init__(self, directory: Optional[Path] = None, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL, api_base: Optional[str] = None, api_key: str = "lm-studio"):
         super().__init__("TPRS Status", "com.tvas.tprs_status")
         self.directory = directory
         self.output_dir = output_dir
         self.model = model
+        self.api_base = api_base
+        self.api_key = api_key
         self.processed_count = 0
         self.total_count = 0
         self.recent_photos = []  # List of (path, rating)
@@ -87,11 +182,18 @@ class TprsStatusApp(toga.App):
             style=Pack(padding=(0, 5), color='blue')
         )
         
+        self.settings_button = toga.Button(
+            "Settings",
+            on_press=self.open_settings,
+            style=Pack(padding=(0, 5))
+        )
+
         folder_row = toga.Box(
             children=[
                 toga.Label("Folder:", style=Pack(padding=(5, 5), width=60)),
                 self.folder_input,
                 self.folder_button,
+                self.settings_button,
                 self.start_button
             ],
             style=Pack(direction=ROW, padding=5)
@@ -183,7 +285,34 @@ class TprsStatusApp(toga.App):
         logging.getLogger().setLevel(logging.INFO)
 
         self.main_window.show()
+
+        # Attempt to maximize window to fill screen
+        try:
+            # Try standard Toga API for maximization
+            self.main_window.state = toga.WindowState.MAXIMIZED
+        except AttributeError:
+            # Fallback: Set to screen size manually
+            try:
+                if hasattr(self, 'screens') and self.screens:
+                    screen = self.screens[0]
+                    self.main_window.size = (screen.size.width, screen.size.height)
+                    self.main_window.position = (0, 0)
+            except Exception as e:
+                logger.warning(f"Failed to maximize window: {e}")
+
+        if self.directory:
+            self.add_background_task(self.auto_start_analysis)
+
+    async def auto_start_analysis(self, app):
+        """Automatically start analysis if directory is provided."""
+        await asyncio.sleep(0.5) # Give UI time to appear
+        await self.start_analysis(self.start_button)
     
+    def open_settings(self, widget):
+        """Open the settings window."""
+        settings_window = SettingsWindow(self)
+        settings_window.show()
+
     async def select_folder(self, widget):
         """Handle folder selection."""
         try:
@@ -261,7 +390,9 @@ class TprsStatusApp(toga.App):
                 self.model,
                 self.output_dir,
                 self.status_callback_shim,
-                self.stop_event
+                self.stop_event,
+                self.api_base,
+                self.api_key
             )
             
             if self.stop_event.is_set():
@@ -277,6 +408,23 @@ class TprsStatusApp(toga.App):
             self.is_running = False
             self.start_button.enabled = True
             self.folder_button.enabled = True
+
+    def load_preview_image(self, path: Path) -> toga.Image:
+        """Load an image for preview, resizing it to avoid UI overflow."""
+        try:
+            with Image.open(path) as img:
+                # Resize to max 1920 width/height to prevent massive UI expansion
+                # while maintaining good quality for preview
+                img.thumbnail((1920, 1080))
+                
+                # Save to bytes
+                import io
+                img_byte_arr = io.BytesIO()
+                img.save(img_byte_arr, format=img.format or 'JPEG')
+                return toga.Image(src=img_byte_arr.getvalue())
+        except Exception as e:
+            logger.warning(f"Failed to load preview {path}: {e}")
+            return toga.Image(str(path))
 
     def status_callback_shim(self, processed, total, current_photo, last_analysis, comparison_photo=None):
         """Shim to call update_ui from the background thread."""
@@ -298,8 +446,8 @@ class TprsStatusApp(toga.App):
                         self.images_container.add(self.image_view_2)
                     
                     try:
-                        self.image_view.image = toga.Image(str(comparison_photo.resolve()))
-                        self.image_view_2.image = toga.Image(str(current_photo.resolve()))
+                        self.image_view.image = self.load_preview_image(comparison_photo)
+                        self.image_view_2.image = self.load_preview_image(current_photo)
                     except Exception as e:
                         logger.warning(f"Failed to load comparison images: {e}")
                 else:
@@ -309,10 +457,7 @@ class TprsStatusApp(toga.App):
                         self.images_container.remove(self.image_view_2)
 
                     try:
-                        # Toga ImageView loads from path
-                        # Ensure path is absolute and string
-                        abs_path = str(current_photo.resolve())
-                        self.image_view.image = toga.Image(abs_path)
+                        self.image_view.image = self.load_preview_image(current_photo)
                     except Exception as e:
                         logger.warning(f"Failed to load image preview for {current_photo}: {e}")
 
@@ -359,6 +504,8 @@ class TprsStatusApp(toga.App):
                         
                         # Save to temp file
                         tf = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                        # Resize before saving for display
+                        img.thumbnail((1920, 1080))
                         img.save(tf.name)
                         tf.close()
                         
@@ -369,9 +516,9 @@ class TprsStatusApp(toga.App):
                 except Exception as e:
                     logger.warning(f"Failed to draw bounding box: {e}")
                     # Fallback to original
-                    self.image_view.image = toga.Image(abs_path)
+                    self.image_view.image = self.load_preview_image(analysis.photo_path)
             else:
-                self.image_view.image = toga.Image(abs_path)
+                self.image_view.image = self.load_preview_image(analysis.photo_path)
 
             self.photo_label.text = analysis.photo_path.name
             
@@ -412,12 +559,24 @@ class TprsStatusApp(toga.App):
         # Create a box for the thumbnail
         thumb_box = toga.Box(style=Pack(direction=COLUMN, width=100, padding=5))
         
+        view_widget = None
         try:
             abs_path = str(analysis.photo_path.resolve())
-            img = toga.Image(abs_path)
-            view = toga.ImageView(image=img, style=Pack(height=80, width=100))
-        except:
-            view = toga.ImageView(style=Pack(height=80, width=100))
+            # Use Button with Icon to make it clickable
+            icon = toga.Icon(abs_path)
+            view_widget = toga.Button(
+                "", 
+                icon=icon,
+                on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
+                style=Pack(height=80, width=100)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create thumbnail button: {e}")
+            view_widget = toga.Button(
+                "View", 
+                on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
+                style=Pack(height=80, width=100)
+            )
             
         rating_label = toga.Label(f"{analysis.rating} ★", style=Pack(text_align=CENTER))
         
@@ -426,27 +585,19 @@ class TprsStatusApp(toga.App):
             subject_text = subject_text[:13] + ".."
         subject_label = toga.Label(subject_text, style=Pack(text_align=CENTER, font_size=10))
         
-        # View button
-        view_btn = toga.Button(
-            "View", 
-            on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
-            style=Pack(font_size=10, padding_top=2)
-        )
-
         if "BestInBurst" in analysis.keywords:
             # Wrap in red box for border effect
             border_box = toga.Box(style=Pack(background_color="red", padding=2))
-            border_box.add(view)
+            border_box.add(view_widget)
             thumb_box.add(border_box)
         else:
-            thumb_box.add(view)
+            thumb_box.add(view_widget)
 
         thumb_box.add(rating_label)
         thumb_box.add(subject_label)
-        thumb_box.add(view_btn)
         
         # Add to start of list
         self.recent_box.insert(0, thumb_box)
 
-def main(directory: Optional[Path] = None, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL):
-    return TprsStatusApp(directory, output_dir, model)
+def main(directory: Optional[Path] = None, output_dir: Optional[Path] = None, model: str = DEFAULT_VLM_MODEL, api_base: Optional[str] = None, api_key: str = "lm-studio"):
+    return TprsStatusApp(directory, output_dir, model, api_base, api_key)
