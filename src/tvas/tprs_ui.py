@@ -120,6 +120,7 @@ class SettingsWindow(toga.Window):
         for pf, input_widget in self.prompt_inputs.items():
             set_prompt_override(pf, input_widget.value)
             
+        self.app_instance.update_mode_label()
         self.app_instance.main_window.info_dialog("Settings", "Settings applied for this session.")
         self.close()
 
@@ -151,6 +152,16 @@ class TprsStatusApp(toga.App):
             # Give it a moment? No, just return True and let it close.
             # The background thread will stop eventually.
         return True
+
+    def update_mode_label(self):
+        """Update the mode label based on current settings."""
+        if hasattr(self, 'mode_label'):
+            if self.api_base:
+                self.mode_label.text = "[API MODE]"
+                self.mode_label.style.color = "green"
+            else:
+                self.mode_label.text = "[MLX-VLM]"
+                self.mode_label.style.color = "#D4AF37"  # Gold
 
     def startup(self):
         """Construct and show the Toga application."""
@@ -196,7 +207,17 @@ class TprsStatusApp(toga.App):
         
         # --- Header: Progress & Logs ---
         self.progress_bar = toga.ProgressBar(max=100, value=0, style=Pack(padding=(0, 10), flex=1))
-        self.status_label = toga.Label("Ready to start", style=Pack(padding=(5, 10)))
+        
+        self.mode_label = toga.Label("", style=Pack(padding=(5, 5), font_weight='bold'))
+        self.update_mode_label()
+        
+        self.status_label = toga.Label("Ready to start", style=Pack(padding=(5, 5), flex=1))
+        
+        status_row = toga.Box(
+            children=[self.mode_label, self.status_label],
+            style=Pack(direction=ROW)
+        )
+
         self.log_label = toga.Label(
             "Select a folder and click Start Analysis", 
             style=Pack(padding=(0, 10), 
@@ -217,7 +238,7 @@ class TprsStatusApp(toga.App):
         )
         
         header_box = toga.Box(
-            children=[self.status_label, self.progress_bar, log_row],
+            children=[status_row, self.progress_bar, log_row],
             style=Pack(direction=COLUMN, padding=10)
         )
 
