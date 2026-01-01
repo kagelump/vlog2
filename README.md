@@ -39,6 +39,14 @@ or you simply prefer faster processing, you can use a cloud provider.
     uvx --from git+https://github.com/kagelump/vlog2 tprs --openrouter
     ``` 
 
+#### FAQ
+
+* Q: I have a ChatGPT subscription, can I use that instead?
+* A: No, ChatGPT subscriptions do not cover API usage.
+
+* Q: Wait I can use ChatGPT for this?
+* A: Yeah but even GPT 5 mini is like [4x more expensive](https://openrouter.ai/openai/gpt-5-mini) than Qwen3-VL.  Regular ChatGPT is [20x more expensive](https://openrouter.ai/openai/gpt-5.2-chat).
+
 
 ## Features
 
