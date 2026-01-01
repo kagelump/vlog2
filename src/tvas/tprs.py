@@ -148,7 +148,6 @@ def call_vlm_api(
         
         with urllib.request.urlopen(req) as response:
             response_data = json.loads(response.read().decode('utf-8'))
-            logging.info(f"VLM API response: {response_data}")
             text = response_data['choices'][0]['message']['content']
             provider = response_data.get('provider')
             return VLMResponse(text=text, provider=provider)
