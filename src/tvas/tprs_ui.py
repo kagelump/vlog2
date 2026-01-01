@@ -58,11 +58,11 @@ class SettingsWindow(toga.Window):
 
         general_box = toga.Box(
             children=[
-                toga.Box(children=[toga.Label("Model:", style=Pack(width=100)), self.model_input], style=Pack(direction=ROW, padding=5)),
-                toga.Box(children=[toga.Label("API Base:", style=Pack(width=100)), self.api_base_input], style=Pack(direction=ROW, padding=5)),
-                toga.Box(children=[toga.Label("API Key:", style=Pack(width=100)), self.api_key_input], style=Pack(direction=ROW, padding=5)),
+                toga.Box(children=[toga.Label("Model:", style=Pack(width=100)), self.model_input], style=Pack(direction=ROW, margin=5)),
+                toga.Box(children=[toga.Label("API Base:", style=Pack(width=100)), self.api_base_input], style=Pack(direction=ROW, margin=5)),
+                toga.Box(children=[toga.Label("API Key:", style=Pack(width=100)), self.api_key_input], style=Pack(direction=ROW, margin=5)),
             ],
-            style=Pack(direction=COLUMN, padding=10)
+            style=Pack(direction=COLUMN, margin=10)
         )
 
         # Prompts
@@ -84,12 +84,12 @@ class SettingsWindow(toga.Window):
             text_input = toga.MultilineTextInput(value=content, style=Pack(flex=1, font_family="monospace"))
             self.prompt_inputs[pf] = text_input
             # OptionContainer expects content to be a list of OptionItem
-            tab_content = toga.Box(children=[text_input], style=Pack(flex=1, padding=5))
+            tab_content = toga.Box(children=[text_input], style=Pack(flex=1, margin=5))
             prompt_container.content.append(toga.OptionItem(pf.replace(".txt", ""), tab_content))
 
         # Buttons
-        save_btn = toga.Button("Apply", on_press=self.save_settings, style=Pack(padding=5))
-        close_btn = toga.Button("Close", on_press=self.close_window, style=Pack(padding=5))
+        save_btn = toga.Button("Apply", on_press=self.save_settings, style=Pack(margin=5))
+        close_btn = toga.Button("Close", on_press=self.close_window, style=Pack(margin=5))
         
         # Use spacer to align right
         btn_box = toga.Box(
@@ -98,14 +98,14 @@ class SettingsWindow(toga.Window):
                 save_btn, 
                 close_btn
             ], 
-            style=Pack(direction=ROW, padding=10)
+            style=Pack(direction=ROW, margin=10)
         )
 
         self.content = toga.Box(
             children=[
-                toga.Label("General Settings", style=Pack(font_weight='bold', padding=10)),
+                toga.Label("General Settings", style=Pack(font_weight='bold', margin=10)),
                 general_box,
-                toga.Label("Prompt Overrides (Session Only)", style=Pack(font_weight='bold', padding=10)),
+                toga.Label("Prompt Overrides (Session Only)", style=Pack(font_weight='bold', margin=10)),
                 prompt_container,
                 btn_box
             ],
@@ -170,7 +170,7 @@ class TprsStatusApp(toga.App):
         self.folder_input = toga.TextInput(
             readonly=True,
             placeholder="Select a folder to scan...",
-            style=Pack(flex=1, padding=(0, 5))
+            style=Pack(flex=1, margin=(0, 5))
         )
         if self.directory:
             self.folder_input.value = str(self.directory)
@@ -178,40 +178,40 @@ class TprsStatusApp(toga.App):
         self.folder_button = toga.Button(
             "Browse...",
             on_press=self.select_folder,
-            style=Pack(padding=(0, 5))
+            style=Pack(margin=(0, 5))
         )
         
         self.start_button = toga.Button(
             "Start Analysis",
             on_press=self.start_analysis,
             enabled=self.directory is not None,
-            style=Pack(padding=(0, 5), color='blue')
+            style=Pack(margin=(0, 5), color='blue')
         )
         
         self.settings_button = toga.Button(
             "Settings",
             on_press=self.open_settings,
-            style=Pack(padding=(0, 5))
+            style=Pack(margin=(0, 5))
         )
 
         folder_row = toga.Box(
             children=[
-                toga.Label("Folder:", style=Pack(padding=(5, 5), width=60)),
+                toga.Label("Folder:", style=Pack(margin=(5, 5), width=60)),
                 self.folder_input,
                 self.folder_button,
                 self.settings_button,
                 self.start_button
             ],
-            style=Pack(direction=ROW, padding=5)
+            style=Pack(direction=ROW, margin=5)
         )
         
         # --- Header: Progress & Logs ---
-        self.progress_bar = toga.ProgressBar(max=100, value=0, style=Pack(padding=(0, 10), flex=1))
+        self.progress_bar = toga.ProgressBar(max=100, value=0, style=Pack(margin=(0, 10), flex=1))
         
-        self.mode_label = toga.Label("", style=Pack(padding=(5, 5), font_weight='bold'))
+        self.mode_label = toga.Label("", style=Pack(margin=(5, 5), font_weight='bold'))
         self.update_mode_label()
         
-        self.status_label = toga.Label("Ready to start", style=Pack(padding=(5, 5), flex=1))
+        self.status_label = toga.Label("Ready to start", style=Pack(margin=(5, 5), flex=1))
         
         status_row = toga.Box(
             children=[self.mode_label, self.status_label],
@@ -220,7 +220,7 @@ class TprsStatusApp(toga.App):
 
         self.log_label = toga.Label(
             "Select a folder and click Start Analysis", 
-            style=Pack(padding=(0, 10), 
+            style=Pack(margin=(0, 10), 
                        font_family="monospace", 
                        font_size=10, 
                        flex=1))
@@ -229,17 +229,17 @@ class TprsStatusApp(toga.App):
             "Resume Live View",
             on_press=self.resume_live_view,
             enabled=False,
-            style=Pack(padding=(0, 5))
+            style=Pack(margin=(0, 5))
         )
 
         log_row = toga.Box(
             children=[self.log_label, self.resume_button],
-            style=Pack(direction=ROW, alignment=CENTER)
+            style=Pack(direction=ROW, align_items=CENTER)
         )
         
         header_box = toga.Box(
             children=[status_row, self.progress_bar, log_row],
-            style=Pack(direction=COLUMN, padding=10)
+            style=Pack(direction=COLUMN, margin=10)
         )
 
         # --- Main: Current Photo & Details ---
@@ -253,7 +253,7 @@ class TprsStatusApp(toga.App):
             style=Pack(direction=ROW, flex=1)
         )
         
-        self.photo_label = toga.Label("No photo loaded", style=Pack(padding=5, text_align=CENTER))
+        self.photo_label = toga.Label("No photo loaded", style=Pack(margin=5, text_align=CENTER))
         
         self.image_area = toga.Box(
             children=[self.images_container, self.photo_label],
@@ -261,12 +261,12 @@ class TprsStatusApp(toga.App):
         )
 
         # Details Panel (Hidden by default or empty)
-        self.details_label = toga.Label("Details", style=Pack(font_weight='bold', padding_bottom=5))
+        self.details_label = toga.Label("Details", style=Pack(font_weight='bold', margin_bottom=5))
         self.details_content = toga.MultilineTextInput(readonly=True, style=Pack(flex=1))
         
         self.details_panel = toga.Box(
             children=[self.details_label, self.details_content],
-            style=Pack(direction=COLUMN, width=300, padding=10)
+            style=Pack(direction=COLUMN, width=300, margin=10)
         )
         # Initially hide details panel by removing it or setting width 0? 
         # Toga doesn't support hiding easily, so we'll just not add it to main_box initially?
@@ -274,12 +274,12 @@ class TprsStatusApp(toga.App):
         
         main_box = toga.Box(
             children=[self.image_area], # details_panel added dynamically
-            style=Pack(direction=ROW, flex=1, padding=10)
+            style=Pack(direction=ROW, flex=1, margin=10)
         )
         self.main_box = main_box # Keep reference
 
         # --- Footer: Recent Photos ---
-        self.recent_box = toga.Box(style=Pack(direction=ROW, padding=10))
+        self.recent_box = toga.Box(style=Pack(direction=ROW, margin=10))
         
         self.recent_scroll = toga.ScrollContainer(
             horizontal=True,
@@ -289,7 +289,7 @@ class TprsStatusApp(toga.App):
         self.recent_scroll.content = self.recent_box
         
         footer_container = toga.Box(
-            children=[toga.Label("Recent Processed", style=Pack(padding=5)), self.recent_scroll],
+            children=[toga.Label("Recent Processed", style=Pack(margin=5)), self.recent_scroll],
             style=Pack(direction=COLUMN)
         )
 
@@ -578,7 +578,7 @@ class TprsStatusApp(toga.App):
     def add_recent_photo(self, analysis: PhotoAnalysis):
         """Add a thumbnail to the recent photos strip."""
         # Create a box for the thumbnail
-        thumb_box = toga.Box(style=Pack(direction=COLUMN, width=120, padding=5))
+        thumb_box = toga.Box(style=Pack(direction=COLUMN, width=120, margin=5))
         
         try:
             # Create thumbnail image
@@ -594,7 +594,7 @@ class TprsStatusApp(toga.App):
             
             if "BestInBurst" in analysis.keywords:
                 # Wrap in red box for border effect
-                border_box = toga.Box(style=Pack(background_color="red", padding=2))
+                border_box = toga.Box(style=Pack(background_color="red", margin=2))
                 border_box.add(image_view)
                 thumb_box.add(border_box)
             else:
@@ -617,7 +617,7 @@ class TprsStatusApp(toga.App):
                 style=Pack(height=80, width=100)
             )
             if "BestInBurst" in analysis.keywords:
-                border_box = toga.Box(style=Pack(background_color="red", padding=2))
+                border_box = toga.Box(style=Pack(background_color="red", margin=2))
                 border_box.add(view_widget)
                 thumb_box.add(border_box)
             else:
