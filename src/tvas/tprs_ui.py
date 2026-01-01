@@ -9,6 +9,7 @@ import threading
 import functools
 import tempfile
 import io
+import gc
 from pathlib import Path
 from typing import Optional
 
@@ -126,6 +127,71 @@ class SettingsWindow(toga.Window):
 
     def close_window(self, widget):
         self.close()
+
+
+class FocusCheckWindow(toga.Window):
+    def __init__(self, app_instance, analysis):
+        super().__init__(title=f"Focus Check: {analysis.photo_path.name}", size=(800, 800))
+        self.app_instance = app_instance
+        self.analysis = analysis
+        self.init_ui()
+
+    def init_ui(self):
+        # We'll create the image view after loading to know the size
+        image_view = None
+        
+        try:
+            with Image.open(self.analysis.photo_path) as img:
+                if self.analysis.primary_subject_bounding_box:
+                    width, height = img.size
+                    xmin, ymin, xmax, ymax = self.analysis.primary_subject_bounding_box
+                    
+                    left = int((xmin / 1000) * width)
+                    top = int((ymin / 1000) * height)
+                    right = int((xmax / 1000) * width)
+                    bottom = int((ymax / 1000) * height)
+                    
+                    # Ensure valid crop
+                    left = max(0, left)
+                    top = max(0, top)
+                    right = min(width, right)
+                    bottom = min(height, bottom)
+                    
+                    # Add some padding (10%)
+                    pad_x = int((right - left) * 0.1)
+                    pad_y = int((bottom - top) * 0.1)
+                    
+                    left = max(0, left - pad_x)
+                    top = max(0, top - pad_y)
+                    right = min(width, right + pad_x)
+                    bottom = min(height, bottom + pad_y)
+                    
+                    if right > left and bottom > top:
+                        img = img.crop((left, top, right, bottom))
+                
+                # Save to temp file for Toga
+                tf = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                img.save(tf.name, quality=95)
+                tf.close()
+                
+                # Create image view with explicit size for 2:1 display (200% zoom)
+                # We set the style width/height to double the image dimensions
+                img_w, img_h = img.size
+                image_view = toga.ImageView(
+                    image=toga.Image(tf.name),
+                    style=Pack(width=img_w * 2, height=img_h * 2)
+                )
+        except Exception as e:
+            logger.error(f"Failed to load focus check image: {e}")
+            
+        if image_view is None:
+            image_view = toga.ImageView(style=Pack(flex=1))
+
+        # Wrap in ScrollContainer to allow panning around the full resolution image
+        scroll_container = toga.ScrollContainer(horizontal=True, vertical=True, style=Pack(flex=1))
+        scroll_container.content = image_view
+        
+        self.content = scroll_container
 
 
 class TprsStatusApp(toga.App):
@@ -263,9 +329,10 @@ class TprsStatusApp(toga.App):
         # Details Panel (Hidden by default or empty)
         self.details_label = toga.Label("Details", style=Pack(font_weight='bold', margin_bottom=5))
         self.details_content = toga.MultilineTextInput(readonly=True, style=Pack(flex=1))
+        self.focus_check_btn = toga.Button("Focus Check (2x)", on_press=self.open_focus_check, enabled=False, style=Pack(margin_top=5))
         
         self.details_panel = toga.Box(
-            children=[self.details_label, self.details_content],
+            children=[self.details_label, self.details_content, self.focus_check_btn],
             style=Pack(direction=COLUMN, width=300, margin=10)
         )
         # Initially hide details panel by removing it or setting width 0? 
@@ -365,8 +432,8 @@ class TprsStatusApp(toga.App):
         existing_analyses = await loop.run_in_executor(None, _load)
         
         if existing_analyses:
-            logger.info(f"Loaded {len(existing_analyses)} existing XMP files.")
-            self.status_label.text = f"Loaded {len(existing_analyses)} existing XMP files."
+            logger.info(f"Loaded {len(existing_analyses)} existing XMP files.  Press 'Start Analysis' to begin.")
+            self.status_label.text = f"Loaded {len(existing_analyses)} existing XMP files.  Press 'Start Analysis' to begin."
             
             # Add to recent strip
             # We add them in order, so the last one in the list (lexicographically last)
@@ -413,6 +480,10 @@ class TprsStatusApp(toga.App):
         self.start_button.enabled = False
         self.folder_button.enabled = False
         self.stop_event.clear()
+        
+        # Force garbage collection on main thread to clean up any UI objects
+        # that might otherwise be collected in the background thread, causing a crash.
+        gc.collect()
         
         try:
             # Start processing
@@ -532,10 +603,17 @@ class TprsStatusApp(toga.App):
         if last_analysis:
             self.add_recent_photo(last_analysis)
 
+    def open_focus_check(self, widget):
+        if hasattr(self, 'current_review_analysis') and self.current_review_analysis:
+            window = FocusCheckWindow(self, self.current_review_analysis)
+            window.show()
+
     def show_details(self, analysis: PhotoAnalysis):
         """Show details for a specific photo."""
         self.is_review_mode = True
         self.resume_button.enabled = True
+        self.current_review_analysis = analysis
+        self.focus_check_btn.enabled = True
         
         # Update main image
         try:
@@ -615,6 +693,8 @@ class TprsStatusApp(toga.App):
         """Resume live view updates."""
         self.is_review_mode = False
         self.resume_button.enabled = False
+        self.current_review_analysis = None
+        self.focus_check_btn.enabled = False
         
         # Hide details panel
         if self.details_panel in self.main_box.children:

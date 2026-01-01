@@ -569,7 +569,7 @@ def analyze_photo(
                                 elif blur_level == "MINOR_BLURRY":
                                     rating_reason += f"BUT Subject '{primary_subject}' detected as MINOR_BLURRY. Reducing rating by 1."
                                     logger.info(rating_reason)
-                                    rating = max(2, rating - 1)
+                                    rating = max(1, rating - 1)
                                     blur_level_int = 1
                                     
                             except json.JSONDecodeError:
