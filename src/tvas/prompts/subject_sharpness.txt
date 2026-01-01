@@ -4,4 +4,9 @@ Classify the blur level as one of the following:
 - "MINOR_BLURRY": The subject has some motion blur or is slightly out of focus, but still recognizable.
 - "VERY_BLURRY": The subject is completely out of focus, blurry, or unrecognizable.
 
-Answer with a JSON object: {{"blur_level": "SHARP" | "MINOR_BLURRY" | "VERY_BLURRY"}}.
+If the image is not SHARP, identify the type of blur:
+- "MOTION": Blur caused by subject movement or camera shake.
+- "FOCUS": Blur caused by missed focus (focus is in front or behind the subject).
+- "N/A": If the image is SHARP.
+
+Answer with a JSON object: {{"blur_level": "SHARP" | "MINOR_BLURRY" | "VERY_BLURRY", "blur_type": "MOTION" | "FOCUS" |  "N/A"}}.

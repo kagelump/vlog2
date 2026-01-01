@@ -10,5 +10,7 @@ Analyze this photograph and provide a JSON object with the following fields:
 "description": A brief one-sentence caption describing what you see.
 "primary_subject": A short phrase identifying the main, sharpest subject in the frame. Ignore blurry background elements.
 "primary_subject_bounding_box": The bounding box of the primary subject as [xmin, ymin, xmax, ymax] on a 0-1000 scale.
+"subject_sharpness_check_required": Boolean (true/false). Whether the primary subject requires a sharpness check. Set to false if the photo is a stylistic backlit shot, a silhouette, or if the subject is intentionally blurry for artistic effect.
+"subject_sharpness_check_reason": Reason why sharpness check is required or not.
 
 Output only the JSON object.

@@ -48,6 +48,8 @@ class PhotoAnalysis:
     blur_level: int = 0  # 0 SHARP 1 MINOR_BLURRY 2 VERY_BLURRY
     burst_id: Optional[str] = None
     provider: Optional[str] = None
+    subject_sharpness_check_required: bool = True
+    subject_sharpness_check_reason: Optional[str] = None
 
 
 @dataclass
@@ -491,6 +493,9 @@ def parse_analysis_response(response_text: str, photo_path: Path, provider: Opti
         if len(description) > 300:
             description = description[:297] + "..."
             
+        subject_sharpness_check_required = data.get("subject_sharpness_check_required", True)
+        subject_sharpness_check_reason = data.get("subject_sharpness_check_reason")
+
         return PhotoAnalysis(
             photo_path=photo_path,
             rating=rating,
@@ -500,7 +505,9 @@ def parse_analysis_response(response_text: str, photo_path: Path, provider: Opti
             primary_subject=primary_subject,
             primary_subject_bounding_box=primary_subject_bounding_box,
             raw_response=response_text,
-            provider=provider
+            provider=provider,
+            subject_sharpness_check_required=subject_sharpness_check_required,
+            subject_sharpness_check_reason=subject_sharpness_check_reason
         )
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response for {photo_path}: {e}")
@@ -560,7 +567,9 @@ def analyze_photo(
 
         try:
             # Secondary analysis: Check subject sharpness
-            if primary_subject and primary_subject_bounding_box and isinstance(primary_subject_bounding_box, list) and len(primary_subject_bounding_box) == 4:
+            if not analysis.subject_sharpness_check_required:
+                logger.info(f"Skipping subject sharpness check for {photo_path.name}: {analysis.subject_sharpness_check_reason}")
+            elif primary_subject and primary_subject_bounding_box and isinstance(primary_subject_bounding_box, list) and len(primary_subject_bounding_box) == 4:
                 logger.debug(f"Performing secondary subject analysis for {primary_subject}")
                 crop_path = crop_image(photo_path, primary_subject_bounding_box)
                 
@@ -587,14 +596,15 @@ def analyze_photo(
                             try:
                                 subject_data = json.loads(clean_subject)
                                 blur_level = subject_data.get("blur_level", "SHARP")
+                                blur_type = subject_data.get("blur_type", "N/A")
                                 
                                 if blur_level == "VERY_BLURRY":
-                                    rating_reason += f"BUT Subject '{primary_subject}' detected as VERY_BLURRY. Downgrading rating to 1."
+                                    rating_reason += f" BUT Subject '{primary_subject}' detected as VERY_BLURRY ({blur_type}). Downgrading rating to 1."
                                     logger.info(rating_reason)
                                     rating = 1
                                     blur_level_int = 2
                                 elif blur_level == "MINOR_BLURRY":
-                                    rating_reason += f"BUT Subject '{primary_subject}' detected as MINOR_BLURRY. Reducing rating by 1."
+                                    rating_reason += f" BUT Subject '{primary_subject}' detected as MINOR_BLURRY ({blur_type}). Reducing rating by 1."
                                     logger.info(rating_reason)
                                     rating = max(1, rating - 1)
                                     blur_level_int = 1
