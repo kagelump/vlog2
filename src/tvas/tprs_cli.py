@@ -98,6 +98,14 @@ Examples:
     )
 
     parser.add_argument(
+        "--processes",
+        "-p",
+        type=int,
+        default=1,
+        help="Number of concurrent processes/threads for burst analysis (default: 1)",
+    )
+
+    parser.add_argument(
         "--api-base",
         type=str,
         help="Base URL for custom API endpoint (e.g., http://localhost:1234/v1). If set, local MLX model is skipped.",
@@ -141,6 +149,12 @@ Examples:
         help="Use OpenRouter API (sets api-base and loads key from ~/.openrouterkey if not provided)",
     )
 
+    parser.add_argument(
+        "--openrouter-provider",
+        type=str,
+        help="Comma-separated list of providers to prefer for OpenRouter (e.g. 'Alibaba,DeepInfra'). Defaults to 'Alibaba' if model is default.",
+    )
+
     # Filter out macOS process serial number argument
     if sys.platform == 'darwin':
         sys.argv = [arg for arg in sys.argv if not arg.startswith('-psn_')]
@@ -162,6 +176,11 @@ Examples:
     if args.openrouter:
         if args.api_base is None:
             args.api_base = "https://openrouter.ai/api/v1"
+        
+        if args.model == DEFAULT_VLM_MODEL:
+            args.model = "qwen/qwen3-vl-8b-instruct"
+            if not args.openrouter_provider:
+                args.openrouter_provider = "Alibaba"
         
         if args.api_key == "lm-studio":
             key_path = Path.home() / ".openrouterkey"
@@ -229,7 +248,9 @@ Examples:
             args.model, 
             args.output,
             api_base=args.api_base,
-            api_key=args.api_key
+            api_key=args.api_key,
+            num_workers=args.processes,
+            provider_preferences=args.openrouter_provider
         )
 
         logger.info("=" * 60)

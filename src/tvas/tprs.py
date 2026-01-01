@@ -10,6 +10,7 @@ import logging
 import os
 import tempfile
 import threading
+import concurrent.futures
 import base64
 import urllib.request
 import urllib.error
@@ -46,6 +47,7 @@ class PhotoAnalysis:
     best_in_burst: bool = False
     blur_level: int = 0  # 0 SHARP 1 MINOR_BLURRY 2 VERY_BLURRY
     burst_id: Optional[str] = None
+    provider: Optional[str] = None
 
 
 @dataclass
@@ -100,73 +102,155 @@ def get_capture_time(image_path: Path) -> datetime:
         return datetime.fromtimestamp(image_path.stat().st_mtime)
 
 
-def call_vlm_api(
-    prompt: str,
-    image_paths: list[Path],
-    api_base: str,
-    api_key: str,
-    model_name: str = "local-model",
-    max_tokens: int = 1000,
-    temperature: float = 0.7
-) -> Optional[VLMResponse]:
-    """Call a VLM API (OpenAI compatible)."""
-    try:
-        messages_content = [{"type": "text", "text": prompt}]
-        
-        for image_path in image_paths:
-            with open(image_path, "rb") as image_file:
-                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-                messages_content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}"
+class VLMClient:
+    """Client for interacting with Vision Language Models (local or API)."""
+
+    def __init__(
+        self,
+        model_name: str = "local-model",
+        api_base: Optional[str] = None,
+        api_key: Optional[str] = None,
+        provider_preferences: Optional[str] = None
+    ):
+        self.model_name = model_name
+        self.api_base = api_base
+        self.api_key = api_key
+        self.provider_preferences = provider_preferences
+        self.model = None
+        self.processor = None
+        self.config = None
+
+        if not self.api_base:
+            self._load_local_model()
+
+    def _load_local_model(self):
+        """Load the local mlx-vlm model."""
+        try:
+            logger.info(f"Loading mlx-vlm model: {self.model_name}")
+            self.model, self.processor = load(self.model_name, trust_remote_code=True)
+            self.config = load_config(self.model_name, trust_remote_code=True)
+        except Exception as e:
+            logger.error(f"Failed to load model {self.model_name}: {e}")
+            raise
+
+    def generate(
+        self,
+        prompt: str,
+        image_paths: list[Path],
+        max_tokens: int = 1000,
+        temperature: float = 0.7
+    ) -> Optional[VLMResponse]:
+        """Generate response from VLM."""
+        if self.api_base:
+            return self._call_api(prompt, image_paths, max_tokens, temperature)
+        else:
+            return self._generate_local(prompt, image_paths, max_tokens, temperature)
+
+    def _call_api(
+        self,
+        prompt: str,
+        image_paths: list[Path],
+        max_tokens: int,
+        temperature: float
+    ) -> Optional[VLMResponse]:
+        """Call a VLM API (OpenAI compatible)."""
+        try:
+            messages_content = [{"type": "text", "text": prompt}]
+            
+            for image_path in image_paths:
+                with open(image_path, "rb") as image_file:
+                    base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+                    messages_content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
+                    })
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            }
+            
+            payload = {
+                "model": self.model_name, 
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": messages_content
                     }
-                })
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            }
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-        
-        payload = {
-            "model": model_name, 
-            "messages": [
-                {
-                    "role": "user",
-                    "content": messages_content
-                }
-            ],
-            "max_tokens": max_tokens,
-            "temperature": temperature
-        }
-        
-        req = urllib.request.Request(
-            f"{api_base}/chat/completions",
-            data=json.dumps(payload).encode('utf-8'),
-            headers=headers,
-            method="POST"
-        )
-        
-        with urllib.request.urlopen(req) as response:
-            response_data = json.loads(response.read().decode('utf-8'))
-            text = response_data['choices'][0]['message']['content']
-            provider = response_data.get('provider')
-            return VLMResponse(text=text, provider=provider)
+            if self.provider_preferences:
+                # Handle comma-separated list
+                providers = [p.strip() for p in self.provider_preferences.split(",") if p.strip()]
+                if providers:
+                    payload["provider"] = {"order": providers}
+            
+            req = urllib.request.Request(
+                f"{self.api_base}/chat/completions",
+                data=json.dumps(payload).encode('utf-8'),
+                headers=headers,
+                method="POST"
+            )
+            
+            with urllib.request.urlopen(req) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                logging.info(f"VLM Request: API response: {response_data}")
+                text = response_data['choices'][0]['message']['content']
+                provider = response_data.get('provider')
+                return VLMResponse(text=text, provider=provider)
 
-    except Exception as e:
-        logger.error(f"API call failed: {e}")
-        return None
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode('utf-8')
+            logger.error(f"API call failed with HTTP {e.code}: {e.reason}")
+            logger.error(f"Server response: {error_body}")
+            return None
+        except Exception as e:
+            logger.error(f"API call failed: {e}")
+            return None
+
+    def _generate_local(
+        self,
+        prompt: str,
+        image_paths: list[Path],
+        max_tokens: int,
+        temperature: float
+    ) -> Optional[VLMResponse]:
+        try:
+            image_paths_str = [str(p) for p in image_paths]
+            formatted_prompt = apply_chat_template(
+                self.processor, self.config, prompt, num_images=len(image_paths)
+            )
+            
+            response = generate(
+                self.model,
+                self.processor,
+                formatted_prompt,
+                image_paths_str,
+                verbose=False,
+                max_tokens=max_tokens,
+                temp=temperature
+            )
+            
+            if hasattr(response, "text"):
+                text = response.text
+            else:
+                text = str(response)
+            
+            return VLMResponse(text=text, provider="mlx-vlm")
+        except Exception as e:
+            logger.error(f"Local generation failed: {e}")
+            return None
 
 
 def are_photos_in_same_burst(
     photo1: Path,
     photo2: Path,
-    model=None,
-    processor=None,
-    config=None,
-    api_base: Optional[str] = None,
-    api_key: Optional[str] = None,
-    model_name: str = "local-model"
+    client: VLMClient
 ) -> tuple[bool, Optional[str]]:
     """Use VLM to determine if two photos belong to the same burst.
     
@@ -187,37 +271,15 @@ def are_photos_in_same_burst(
         
         prompt = load_prompt("burst_similarity.txt")
 
-        if api_base:
-            response = call_vlm_api(
-                prompt=prompt,
-                image_paths=image_paths,
-                api_base=api_base,
-                api_key=api_key,
-                model_name=model_name,
-                max_tokens=50
-            )
-            if not response:
-                return False, None
-            text = response.text
-        else:
-            image_paths_str = [str(p) for p in image_paths]
-            formatted_prompt = apply_chat_template(
-                processor, config, prompt, num_images=2
-            )
-            
-            response = generate(
-                model,
-                processor,
-                formatted_prompt,
-                image_paths_str,
-                verbose=False,
-                max_tokens=50,
-            )
-            
-            if hasattr(response, "text"):
-                text = response.text
-            else:
-                text = str(response)
+        response = client.generate(
+            prompt=prompt,
+            image_paths=image_paths,
+            max_tokens=50
+        )
+        
+        if not response:
+            return False, None
+        text = response.text
         
         # Clean JSON
         clean_text = text.strip()
@@ -248,14 +310,9 @@ def are_photos_in_same_burst(
 
 def generate_bursts(
     photos: list[Path], 
-    model=None,
-    processor=None,
-    config=None,
+    client: VLMClient,
     threshold_minutes: float = 5.0,
-    comparison_callback: Optional[Callable[[Path, Path], None]] = None,
-    api_base: Optional[str] = None,
-    api_key: Optional[str] = None,
-    model_name: str = "local-model"
+    comparison_callback: Optional[Callable[[Path, Path], None]] = None
 ) -> Iterator[tuple[list[Path], Optional[str]]]:
     """Yield bursts of photos based on capture time and visual similarity.
     
@@ -296,8 +353,7 @@ def generate_bursts(
             if comparison_callback:
                 comparison_callback(prev_photo, curr_photo)
             is_same_burst, keyword = are_photos_in_same_burst(
-                prev_photo, curr_photo, model, processor, config,
-                api_base=api_base, api_key=api_key, model_name=model_name
+                prev_photo, curr_photo, client
             )
             
         if is_same_burst:
@@ -380,7 +436,7 @@ def expand_bbox(bbox: list[int]) -> list[int]:
       y2]
 
 
-def parse_analysis_response(response_text: str, photo_path: Path) -> Optional[PhotoAnalysis]:
+def parse_analysis_response(response_text: str, photo_path: Path, provider: Optional[str] = None) -> Optional[PhotoAnalysis]:
     """Parse JSON response from VLM."""
     # Clean up response text (remove markdown code blocks if present)
     clean_text = response_text.strip()
@@ -442,7 +498,8 @@ def parse_analysis_response(response_text: str, photo_path: Path) -> Optional[Ph
             description=description,
             primary_subject=primary_subject,
             primary_subject_bounding_box=primary_subject_bounding_box,
-            raw_response=response_text
+            raw_response=response_text,
+            provider=provider
         )
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response for {photo_path}: {e}")
@@ -455,23 +512,13 @@ def parse_analysis_response(response_text: str, photo_path: Path) -> Optional[Ph
 
 def analyze_photo(
     photo_path: Path,
-    model=None,
-    processor=None,
-    config=None,
-    api_base: Optional[str] = None,
-    api_key: Optional[str] = None,
-    model_name: str = "local-model"
+    client: VLMClient
 ) -> Optional[PhotoAnalysis]:
     """Analyze a photo using Vision Language Model via mlx-vlm or API.
 
     Args:
         photo_path: Path to the photo file.
-        model: Loaded mlx-vlm model.
-        processor: Loaded processor.
-        config: Loaded config.
-        api_base: Optional API base URL.
-        api_key: Optional API key.
-        model_name: Model name for API.
+        client: VLMClient instance.
 
     Returns:
         PhotoAnalysis with rating, keywords, and description, or None if analysis fails.
@@ -480,46 +527,24 @@ def analyze_photo(
     temp_path = resize_image(photo_path)
     image_path = temp_path if temp_path else photo_path
     blur_level_int = 0
+    provider = "mlx-vlm"
 
     try:
         # Single prompt for JSON output
         json_prompt = load_prompt("photo_analysis.txt")
 
-        if api_base:
-            response = call_vlm_api(
-                prompt=json_prompt,
-                image_paths=[image_path],
-                api_base=api_base,
-                api_key=api_key,
-                model_name=model_name,
-                max_tokens=1000
-            )
-            if not response:
-                return None
-            response_text = response.text
-        else:
-            image_path_str = str(image_path)
-            logger.debug(f"Analyzing {photo_path.name} with JSON prompt")
-            formatted_prompt = apply_chat_template(
-                processor, config, json_prompt, num_images=1
-            )
+        response = client.generate(
+            prompt=json_prompt,
+            image_paths=[image_path],
+            max_tokens=1000
+        )
+        
+        if not response:
+            return None
+        response_text = response.text
+        provider = response.provider or "api"
 
-            response = generate(
-                model,
-                processor,
-                formatted_prompt,
-                [image_path_str],
-                verbose=False,
-                max_tokens=1000,
-            )
-            
-            # Handle GenerationResult object
-            if hasattr(response, "text"):
-                response_text = response.text
-            else:
-                response_text = str(response)
-
-        analysis = parse_analysis_response(response_text, photo_path)
+        analysis = parse_analysis_response(response_text, photo_path, provider=provider)
         if not analysis:
             return None
             
@@ -547,34 +572,12 @@ def analyze_photo(
                         subject_prompt_template = load_prompt("subject_sharpness.txt")
                         subject_prompt = subject_prompt_template.format(primary_subject=primary_subject)
                         
-                        if api_base:
-                            response = call_vlm_api(
-                                prompt=subject_prompt,
-                                image_paths=[final_crop_path],
-                                api_base=api_base,
-                                api_key=api_key,
-                                model_name=model_name,
-                                max_tokens=100
-                            )
-                            subject_text = response.text if response else None
-                        else:
-                            formatted_subject_prompt = apply_chat_template(
-                                processor, config, subject_prompt, num_images=1
-                            )
-                            
-                            subject_response = generate(
-                                model,
-                                processor,
-                                formatted_subject_prompt,
-                                [str(final_crop_path)],
-                                verbose=False,
-                                max_tokens=100,
-                            )
-                            
-                            if hasattr(subject_response, "text"):
-                                subject_text = subject_response.text
-                            else:
-                                subject_text = str(subject_response)
+                        response = client.generate(
+                            prompt=subject_prompt,
+                            image_paths=[final_crop_path],
+                            max_tokens=100
+                        )
+                        subject_text = response.text if response else None
                             
                         if subject_text:
                             # Clean JSON
@@ -637,6 +640,7 @@ def analyze_photo(
             primary_subject_bounding_box=primary_subject_bounding_box,
             raw_response=response_text,
             blur_level=blur_level_int,
+            provider=analysis.provider,
         )
 
     except Exception as e:
@@ -727,6 +731,10 @@ def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = 
         tprs_burst = ET.SubElement(description, "tprs:burst_id")
         tprs_burst.text = analysis.burst_id
 
+    if analysis.provider:
+        tprs_provider = ET.SubElement(description, "tprs:provider")
+        tprs_provider.text = analysis.provider
+
     # Write to file with proper XML formatting
     tree = ET.ElementTree(xmpmeta)
     ET.indent(tree, space="  ")
@@ -813,6 +821,11 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
         if burst_id_elem is not None:
             burst_id = burst_id_elem.text
 
+        provider = None
+        provider_elem = root.find(".//tprs:provider", namespaces)
+        if provider_elem is not None:
+            provider = provider_elem.text
+
         return PhotoAnalysis(
             photo_path=photo_path,
             rating=rating,
@@ -824,7 +837,8 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
             raw_response=raw_response,
             best_in_burst=best_in_burst,
             blur_level=blur_level,
-            burst_id=burst_id
+            burst_id=burst_id,
+            provider=provider
         )
     except Exception as e:
         logger.warning(f"Failed to parse XMP {xmp_path}: {e}")
@@ -833,12 +847,7 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
 
 def select_best_in_burst(
     burst_analyses: list[PhotoAnalysis],
-    model=None,
-    processor=None,
-    config=None,
-    api_base: Optional[str] = None,
-    api_key: Optional[str] = None,
-    model_name: str = "local-model"
+    client: VLMClient
 ) -> PhotoAnalysis:
     """Select the best photo from a burst using VLM comparison."""
     # Filter for candidates (rating >= 3)
@@ -871,35 +880,12 @@ def select_best_in_burst(
         
         prompt = load_prompt("best_in_burst.txt")
 
-        if api_base:
-            response = call_vlm_api(
-                prompt=prompt,
-                image_paths=image_paths,
-                api_base=api_base,
-                api_key=api_key,
-                model_name=model_name,
-                max_tokens=100
-            )
-            response_text = response.text if response else None
-        else:
-            image_paths_str = [str(p) for p in image_paths]
-            formatted_prompt = apply_chat_template(
-                processor, config, prompt, num_images=len(image_paths)
-            )
-            
-            response = generate(
-                model,
-                processor,
-                formatted_prompt,
-                image_paths_str,
-                verbose=False,
-                max_tokens=100,
-            )
-            
-            if hasattr(response, "text"):
-                response_text = response.text
-            else:
-                response_text = str(response)
+        response = client.generate(
+            prompt=prompt,
+            image_paths=image_paths,
+            max_tokens=100
+        )
+        response_text = response.text if response else None
             
         # Clean JSON
         clean_text = response_text.strip()
@@ -941,6 +927,8 @@ def process_photos_batch(
     stop_event: Optional[threading.Event] = None,
     api_base: Optional[str] = None,
     api_key: str = "lm-studio",
+    num_workers: int = 1,
+    provider_preferences: Optional[str] = None
 ) -> list[tuple[PhotoAnalysis, Path]]:
     """Process a batch of photos and generate XMP sidecars.
 
@@ -952,6 +940,7 @@ def process_photos_batch(
         stop_event: Optional threading.Event to signal cancellation.
         api_base: Optional API base URL. If set, local model is skipped.
         api_key: API key for custom endpoint.
+        num_workers: Number of concurrent workers.
 
     Returns:
         List of (PhotoAnalysis, xmp_path) tuples.
@@ -990,21 +979,17 @@ def process_photos_batch(
         logger.info("All photos have existing sidecars. No processing needed.")
         return results
 
-    model = None
-    processor = None
-    config = None
-
-    if not api_base:
-        # Load model once
-        try:
-            logger.info(f"Loading mlx-vlm model: {model_name}")
-            model, processor = load(model_name, trust_remote_code=True)
-            config = load_config(model_name, trust_remote_code=True)
-        except Exception as e:
-            logger.error(f"Failed to load model {model_name}: {e}")
-            return results
-    else:
-        logger.info(f"Using custom API endpoint: {api_base}")
+    # Initialize VLM Client
+    try:
+        client = VLMClient(
+            model_name=model_name,
+            api_base=api_base,
+            api_key=api_key,
+            provider_preferences=provider_preferences
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize VLM Client: {e}")
+        return results
 
     # Define comparison callback wrapper
     comparison_cb = None
@@ -1018,17 +1003,22 @@ def process_photos_batch(
 
     # Group into bursts
     burst_iterator = generate_bursts(
-        photos_to_process, model, processor, config, 
-        comparison_callback=comparison_cb,
-        api_base=api_base, api_key=api_key, model_name=model_name
+        photos_to_process, client, 
+        comparison_callback=comparison_cb
     )
     
-    for i, (burst, burst_keyword) in enumerate(burst_iterator):
-        if stop_event and stop_event.is_set():
-            logger.info("Processing cancelled by user.")
-            break
+    # Shared state for concurrency
+    processed_count_lock = threading.Lock()
+    used_burst_ids_lock = threading.Lock()
+    # Use a mutable container for processed_count to share across threads
+    shared_state = {"processed_count": processed_count}
 
-        logger.info(f"Processing burst {i + 1} ({len(burst)} photos)")
+    def process_single_burst(burst_data):
+        burst, burst_keyword = burst_data
+        if stop_event and stop_event.is_set():
+            return []
+
+        logger.info(f"Processing burst ({len(burst)} photos)")
         
         burst_analyses = []
         for photo_path in burst:
@@ -1037,37 +1027,40 @@ def process_photos_batch(
 
             # Notify start
             if status_callback:
+                with processed_count_lock:
+                    current_count = shared_state["processed_count"]
                 try:
-                    status_callback(processed_count, total_photos, photo_path, None, None)
+                    status_callback(current_count, total_photos, photo_path, None, None)
                 except TypeError:
-                    status_callback(processed_count, total_photos, photo_path, None)
+                    status_callback(current_count, total_photos, photo_path, None)
 
             # Analyze photo
             analysis = analyze_photo(
-                photo_path, model, processor, config,
-                api_base=api_base, api_key=api_key, model_name=model_name
+                photo_path, client
             )
             
-            processed_count += 1
+            with processed_count_lock:
+                shared_state["processed_count"] += 1
+                current_count = shared_state["processed_count"]
             
             if analysis:
                 burst_analyses.append(analysis)
                 # Notify end with analysis
                 if status_callback:
                     try:
-                        status_callback(processed_count, total_photos, photo_path, analysis, None)
+                        status_callback(current_count, total_photos, photo_path, analysis, None)
                     except TypeError:
-                        status_callback(processed_count, total_photos, photo_path, analysis)
+                        status_callback(current_count, total_photos, photo_path, analysis)
             else:
                 # Notify end (failed)
                 if status_callback:
                     try:
-                        status_callback(processed_count, total_photos, photo_path, None, None)
+                        status_callback(current_count, total_photos, photo_path, None, None)
                     except TypeError:
-                        status_callback(processed_count, total_photos, photo_path, None)
+                        status_callback(current_count, total_photos, photo_path, None)
 
         if not burst_analyses:
-            continue
+            return []
 
         # Determine burst_id
         if not burst_keyword:
@@ -1083,14 +1076,15 @@ def process_photos_batch(
             burst_keyword = "burst"
             
         # Generate unique ID
-        counter = 1
-        while True:
-            candidate_id = f"{burst_keyword}_{counter:04d}"
-            if candidate_id not in used_burst_ids:
-                burst_id = candidate_id
-                used_burst_ids.add(burst_id)
-                break
-            counter += 1
+        with used_burst_ids_lock:
+            counter = 1
+            while True:
+                candidate_id = f"{burst_keyword}_{counter:04d}"
+                if candidate_id not in used_burst_ids:
+                    burst_id = candidate_id
+                    used_burst_ids.add(burst_id)
+                    break
+                counter += 1
             
         # Assign to all
         for analysis in burst_analyses:
@@ -1100,8 +1094,7 @@ def process_photos_batch(
         best_photo = None
         if len(burst_analyses) > 1:
             best_photo = select_best_in_burst(
-                burst_analyses, model, processor, config,
-                api_base=api_base, api_key=api_key, model_name=model_name
+                burst_analyses, client
             )
             
             # Apply rating constraints
@@ -1114,6 +1107,7 @@ def process_photos_batch(
                     analysis.keywords.append("BurstDuplicate")
         
         # Generate XMP for all
+        burst_results = []
         for analysis in burst_analyses:
             if output_dir:
                 xmp_path = output_dir / f"{analysis.photo_path.stem}.xmp"
@@ -1121,7 +1115,34 @@ def process_photos_batch(
                 xmp_path = None
 
             xmp_file = generate_xmp_sidecar(analysis, xmp_path)
-            results.append((analysis, xmp_file))
+            burst_results.append((analysis, xmp_file))
+            
+        return burst_results
+
+    if num_workers > 1:
+        logger.info(f"Processing bursts with {num_workers} workers")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all bursts
+            futures = [executor.submit(process_single_burst, burst_data) for burst_data in burst_iterator]
+            
+            for future in concurrent.futures.as_completed(futures):
+                if stop_event and stop_event.is_set():
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+                try:
+                    burst_results = future.result()
+                    results.extend(burst_results)
+                except Exception as e:
+                    logger.error(f"Burst processing failed: {e}")
+    else:
+        # Sequential processing
+        for burst_data in burst_iterator:
+            if stop_event and stop_event.is_set():
+                logger.info("Processing cancelled by user.")
+                break
+            
+            burst_results = process_single_burst(burst_data)
+            results.extend(burst_results)
 
     logger.info(f"Processed {len(results)} photos")
     return results

@@ -10,6 +10,7 @@ import functools
 import tempfile
 import io
 import gc
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -210,6 +211,8 @@ class TprsStatusApp(toga.App):
         self.is_review_mode = False  # Track if user is viewing details
         self.stop_event = threading.Event()
         self.on_exit = self.exit_handler
+        self.analysis_start_time = None
+        self.initial_processed_count = None
 
     def exit_handler(self, app):
         """Handle app exit."""
@@ -390,7 +393,7 @@ class TprsStatusApp(toga.App):
                 logger.warning(f"Failed to maximize window: {e}")
 
         if self.directory:
-            self.add_background_task(self.auto_start_analysis)
+            self.on_running = self.auto_start_analysis
 
     async def auto_start_analysis(self, app):
         """Automatically start analysis if directory is provided."""
@@ -501,6 +504,8 @@ class TprsStatusApp(toga.App):
         """Run the analysis in a background thread."""
         self.is_running = True
         self.status_label.text = f"Scanning {self.directory}..."
+        self.analysis_start_time = time.time()
+        self.initial_processed_count = None
         
         # Find photos first (fast enough to run here or in thread)
         # But process_photos_batch expects a list, so let's find them first.
@@ -575,7 +580,29 @@ class TprsStatusApp(toga.App):
         """Update UI elements on the main thread."""
         self.processed_count = processed
         self.progress_bar.value = processed
-        self.status_label.text = f"Processing: {processed}/{total}"
+        
+        # Calculate stats
+        if self.initial_processed_count is None:
+            self.initial_processed_count = processed
+            
+        delta_processed = processed - self.initial_processed_count
+        
+        avg_speed = 45.0 # Default
+        if delta_processed > 0 and self.analysis_start_time:
+            elapsed = time.time() - self.analysis_start_time
+            avg_speed = elapsed / delta_processed
+            
+        remaining = total - processed
+        eta_seconds = remaining * avg_speed
+        
+        # Format ETA
+        if eta_seconds < 60:
+            eta_str = f"{int(eta_seconds)}s"
+        else:
+            eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s"
+            
+        status_text = f"Processing: {processed}/{total} | Avg: {avg_speed:.1f}s/photo | ETA: {eta_str}"
+        self.status_label.text = status_text
         
         # Only update main view if NOT in review mode
         if not self.is_review_mode:
@@ -678,13 +705,15 @@ class TprsStatusApp(toga.App):
             logger.error(f"Failed to load image for details: {e}")
 
         # Update details panel
-        details_text = f"Rating: {analysis.rating} Stars\n"
+        details_text = f"Rating: {analysis.rating} Stars\n\n"
         details_text += f"Rating reason: {analysis.rating_reason}\n\n"
         details_text += f"Subject: {analysis.primary_subject}\n\n"
         details_text += f"Keywords:\n{', '.join(analysis.keywords)}\n\n"
         details_text += f"Description:\n{analysis.description}\n\n"
         if analysis.raw_response:
              details_text += f"Raw Response:\n{analysis.raw_response}"
+        if analysis.provider:
+            details_text += f"\n\nProvider: {analysis.provider}\n"
 
         self.details_content.value = details_text
         
