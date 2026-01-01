@@ -135,6 +135,12 @@ Examples:
         help="Use LM Studio local server (sets api-base and model)",
     )
 
+    parser.add_argument(
+        "--openrouter",
+        action="store_true",
+        help="Use OpenRouter API (sets api-base and loads key from ~/.openrouterkey if not provided)",
+    )
+
     # Filter out macOS process serial number argument
     if sys.platform == 'darwin':
         sys.argv = [arg for arg in sys.argv if not arg.startswith('-psn_')]
@@ -142,7 +148,7 @@ Examples:
     args = parser.parse_args()
 
     # Auto-detect LM Studio
-    if not args.lmstudio and not args.api_base:
+    if not args.lmstudio and not args.api_base and not args.openrouter:
         if check_lmstudio_running():
             logger.info("Auto-detected LM Studio at http://localhost:1234. Enabling --lmstudio mode.")
             args.lmstudio = True
@@ -152,6 +158,21 @@ Examples:
             args.api_base = "http://localhost:1234/v1"
         if args.model == DEFAULT_VLM_MODEL:
             args.model = "qwen/qwen3-vl"
+
+    if args.openrouter:
+        if args.api_base is None:
+            args.api_base = "https://openrouter.ai/api/v1"
+        
+        if args.api_key == "lm-studio":
+            key_path = Path.home() / ".openrouterkey"
+            if key_path.exists():
+                try:
+                    args.api_key = key_path.read_text().strip()
+                    logger.info(f"Loaded OpenRouter API key from {key_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to read {key_path}: {e}")
+            else:
+                logger.warning(f"OpenRouter mode enabled but {key_path} not found and no --api-key provided.")
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)

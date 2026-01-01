@@ -77,6 +77,7 @@ class TestGenerateXmpSidecar:
             analysis = PhotoAnalysis(
                 photo_path=photo_path,
                 rating=4,
+                rating_reason="Good photo",
                 keywords=["sunset", "beach", "ocean", "waves", "sky"],
                 description="Beautiful sunset over the ocean with waves.",
             )
@@ -117,6 +118,7 @@ class TestGenerateXmpSidecar:
             analysis = PhotoAnalysis(
                 photo_path=photo_path,
                 rating=5,
+                rating_reason="Excellent photo",
                 keywords=["test", "photo", "sample", "demo", "example"],
                 description="Test photo description.",
             )
@@ -139,6 +141,7 @@ class TestGenerateXmpSidecar:
                 analysis = PhotoAnalysis(
                     photo_path=photo_path,
                     rating=rating,
+                    rating_reason="Test reason",
                     keywords=["test"] * 5,
                     description="Test description",
                 )
@@ -157,6 +160,7 @@ class TestPhotoAnalysis:
         analysis = PhotoAnalysis(
             photo_path=photo_path,
             rating=3,
+            rating_reason="Average photo",
             keywords=["test", "sample", "photo", "demo", "image"],
             description="A test photo",
         )
@@ -172,6 +176,7 @@ class TestPhotoAnalysis:
         analysis = PhotoAnalysis(
             photo_path=Path("/test/photo.jpg"),
             rating=4,
+            rating_reason="Good photo",
             keywords=["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
             description="Description",
             raw_response="Raw VLM response",

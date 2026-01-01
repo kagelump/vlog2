@@ -47,6 +47,13 @@ class PhotoAnalysis:
     blur_level: int = 0  # 0 SHARP 1 MINOR_BLURRY 2 VERY_BLURRY
 
 
+@dataclass
+class VLMResponse:
+    """Response from VLM API."""
+    text: str
+    provider: Optional[str] = None
+
+
 def find_jpeg_photos(directory: Path) -> list[Path]:
     """Find all JPEG photos in a directory and subdirectories.
 
@@ -100,7 +107,7 @@ def call_vlm_api(
     model_name: str = "local-model",
     max_tokens: int = 1000,
     temperature: float = 0.7
-) -> Optional[str]:
+) -> Optional[VLMResponse]:
     """Call a VLM API (OpenAI compatible)."""
     try:
         messages_content = [{"type": "text", "text": prompt}]
@@ -141,7 +148,10 @@ def call_vlm_api(
         
         with urllib.request.urlopen(req) as response:
             response_data = json.loads(response.read().decode('utf-8'))
-            return response_data['choices'][0]['message']['content']
+            logging.info(f"VLM API response: {response_data}")
+            text = response_data['choices'][0]['message']['content']
+            provider = response_data.get('provider')
+            return VLMResponse(text=text, provider=provider)
 
     except Exception as e:
         logger.error(f"API call failed: {e}")
@@ -174,7 +184,7 @@ def are_photos_in_same_burst(
         prompt = load_prompt("burst_similarity.txt")
 
         if api_base:
-            text = call_vlm_api(
+            response = call_vlm_api(
                 prompt=prompt,
                 image_paths=image_paths,
                 api_base=api_base,
@@ -182,8 +192,9 @@ def are_photos_in_same_burst(
                 model_name=model_name,
                 max_tokens=50
             )
-            if not text:
+            if not response:
                 return False
+            text = response.text
         else:
             image_paths_str = [str(p) for p in image_paths]
             formatted_prompt = apply_chat_template(
@@ -203,13 +214,6 @@ def are_photos_in_same_burst(
                 text = response.text
             else:
                 text = str(response)
-            
-        # Clean JSON
-        clean_text = text.strip()
-        if clean_text.startswith("```json"): clean_text = clean_text[7:]
-        if clean_text.startswith("```"): clean_text = clean_text[3:]
-        if clean_text.endswith("```"): clean_text = clean_text[:-3]
-        clean_text = clean_text.strip()
         
         data = json.loads(clean_text)
         return bool(data.get("same_burst", False))
@@ -461,7 +465,7 @@ def analyze_photo(
         json_prompt = load_prompt("photo_analysis.txt")
 
         if api_base:
-            response_text = call_vlm_api(
+            response = call_vlm_api(
                 prompt=json_prompt,
                 image_paths=[image_path],
                 api_base=api_base,
@@ -469,8 +473,9 @@ def analyze_photo(
                 model_name=model_name,
                 max_tokens=1000
             )
-            if not response_text:
+            if not response:
                 return None
+            response_text = response.text
         else:
             image_path_str = str(image_path)
             logger.debug(f"Analyzing {photo_path.name} with JSON prompt")
@@ -522,7 +527,7 @@ def analyze_photo(
                         subject_prompt = subject_prompt_template.format(primary_subject=primary_subject)
                         
                         if api_base:
-                            subject_text = call_vlm_api(
+                            response = call_vlm_api(
                                 prompt=subject_prompt,
                                 image_paths=[final_crop_path],
                                 api_base=api_base,
@@ -530,6 +535,7 @@ def analyze_photo(
                                 model_name=model_name,
                                 max_tokens=100
                             )
+                            subject_text = response.text if response else None
                         else:
                             formatted_subject_prompt = apply_chat_template(
                                 processor, config, subject_prompt, num_images=1
@@ -815,7 +821,7 @@ def select_best_in_burst(
         prompt = load_prompt("best_in_burst.txt")
 
         if api_base:
-            response_text = call_vlm_api(
+            response = call_vlm_api(
                 prompt=prompt,
                 image_paths=image_paths,
                 api_base=api_base,
@@ -823,6 +829,7 @@ def select_best_in_burst(
                 model_name=model_name,
                 max_tokens=100
             )
+            response_text = response.text if response else None
         else:
             image_paths_str = [str(p) for p in image_paths]
             formatted_prompt = apply_chat_template(
