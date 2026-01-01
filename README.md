@@ -12,6 +12,7 @@ For simplicity, we recommend running via uv.
 
 1.  **Install LM Studio**: Download from [lmstudio.ai](https://lmstudio.ai/).
 2.  **Download Model**: Search for `qwen 3 vl 8B` in LM Studio and download it.  Wait for the download to complete.
+    * (Optional) Between 4B, 8B, and 30B, choose the largest one that says "Full GPU Offload Possible".  8B is a good default.
 3.  **Install uv**: As per [official instructions](https://docs.astral.sh/uv/getting-started/installation/)
 ```shell
 curl -LsSf https://astral.sh/uv/install.sh | sh

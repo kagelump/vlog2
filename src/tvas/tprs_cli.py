@@ -151,7 +151,7 @@ Examples:
         if args.api_base is None:
             args.api_base = "http://localhost:1234/v1"
         if args.model == DEFAULT_VLM_MODEL:
-            args.model = "qwen/qwen3-vl-8b"
+            args.model = "qwen/qwen3-vl"
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
