@@ -45,6 +45,7 @@ class PhotoAnalysis:
     raw_response: Optional[str] = None
     best_in_burst: bool = False
     blur_level: int = 0  # 0 SHARP 1 MINOR_BLURRY 2 VERY_BLURRY
+    burst_id: Optional[str] = None
 
 
 @dataclass
@@ -166,8 +167,12 @@ def are_photos_in_same_burst(
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
     model_name: str = "local-model"
-) -> bool:
-    """Use VLM to determine if two photos belong to the same burst."""
+) -> tuple[bool, Optional[str]]:
+    """Use VLM to determine if two photos belong to the same burst.
+    
+    Returns:
+        Tuple of (is_same_burst, keyword).
+    """
     p1_resized = None
     p2_resized = None
     try:
@@ -192,7 +197,7 @@ def are_photos_in_same_burst(
                 max_tokens=50
             )
             if not response:
-                return False
+                return False, None
             text = response.text
         else:
             image_paths_str = [str(p) for p in image_paths]
@@ -214,12 +219,19 @@ def are_photos_in_same_burst(
             else:
                 text = str(response)
         
-        data = json.loads(text)
-        return bool(data.get("same_burst", False))
+        # Clean JSON
+        clean_text = text.strip()
+        if clean_text.startswith("```json"): clean_text = clean_text[7:]
+        if clean_text.startswith("```"): clean_text = clean_text[3:]
+        if clean_text.endswith("```"): clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+
+        data = json.loads(clean_text)
+        return bool(data.get("same_burst", False)), data.get("keyword")
         
     except Exception as e:
         logger.warning(f"Burst comparison failed for {photo1.name} and {photo2.name}: {e}")
-        return False
+        return False, None
     finally:
         # Cleanup temp files
         if p1_resized and p1_resized.exists():
@@ -244,8 +256,12 @@ def generate_bursts(
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
     model_name: str = "local-model"
-) -> Iterator[list[Path]]:
-    """Yield bursts of photos based on capture time and visual similarity."""
+) -> Iterator[tuple[list[Path], Optional[str]]]:
+    """Yield bursts of photos based on capture time and visual similarity.
+    
+    Returns:
+        Iterator of (burst_photos, burst_keyword).
+    """
     if not photos:
         return
         
@@ -257,6 +273,7 @@ def generate_bursts(
     photos_with_time.sort(key=lambda x: x[1])
     
     current_burst = [photos_with_time[0][0]]
+    current_keyword = None
     prev_time = photos_with_time[0][1]
     prev_photo = photos_with_time[0][0]
     
@@ -268,6 +285,8 @@ def generate_bursts(
         time_diff = (curr_time - prev_time).total_seconds() / 60.0
         
         is_same_burst = False
+        keyword = None
+        
         if time_diff > threshold_minutes:
             # Definitely different burst
             is_same_burst = False
@@ -276,22 +295,25 @@ def generate_bursts(
             logger.info(f"Checking burst similarity: {prev_photo.name} vs {curr_photo.name} (diff: {time_diff:.1f}m)")
             if comparison_callback:
                 comparison_callback(prev_photo, curr_photo)
-            is_same_burst = are_photos_in_same_burst(
+            is_same_burst, keyword = are_photos_in_same_burst(
                 prev_photo, curr_photo, model, processor, config,
                 api_base=api_base, api_key=api_key, model_name=model_name
             )
             
         if is_same_burst:
             current_burst.append(curr_photo)
+            if keyword and not current_keyword:
+                current_keyword = keyword
         else:
-            yield current_burst
+            yield current_burst, current_keyword
             current_burst = [curr_photo]
+            current_keyword = None
             
         prev_time = curr_time
         prev_photo = curr_photo
             
     if current_burst:
-        yield current_burst
+        yield current_burst, current_keyword
 
 
 def resize_image(image_path: Path, max_dimension: int = 1024) -> Optional[Path]:
@@ -693,6 +715,18 @@ def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = 
         tprs_raw = ET.SubElement(description, "tprs:raw_response")
         tprs_raw.text = analysis.raw_response
 
+    if analysis.blur_level is not None:
+        tprs_blur = ET.SubElement(description, "tprs:blur_level")
+        tprs_blur.text = str(analysis.blur_level)
+
+    if analysis.best_in_burst:
+        tprs_best = ET.SubElement(description, "tprs:best_in_burst")
+        tprs_best.text = "True"
+
+    if analysis.burst_id:
+        tprs_burst = ET.SubElement(description, "tprs:burst_id")
+        tprs_burst.text = analysis.burst_id
+
     # Write to file with proper XML formatting
     tree = ET.ElementTree(xmpmeta)
     ET.indent(tree, space="  ")
@@ -764,6 +798,21 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
         if raw_elem is not None:
             raw_response = raw_elem.text
 
+        blur_level = 0
+        blur_elem = root.find(".//tprs:blur_level", namespaces)
+        if blur_elem is not None and blur_elem.text and blur_elem.text.isdigit():
+            blur_level = int(blur_elem.text)
+
+        best_in_burst = False
+        best_elem = root.find(".//tprs:best_in_burst", namespaces)
+        if best_elem is not None and best_elem.text == "True":
+            best_in_burst = True
+
+        burst_id = None
+        burst_id_elem = root.find(".//tprs:burst_id", namespaces)
+        if burst_id_elem is not None:
+            burst_id = burst_id_elem.text
+
         return PhotoAnalysis(
             photo_path=photo_path,
             rating=rating,
@@ -772,7 +821,10 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
             description=description,
             primary_subject=primary_subject,
             primary_subject_bounding_box=primary_subject_bounding_box,
-            raw_response=raw_response
+            raw_response=raw_response,
+            best_in_burst=best_in_burst,
+            blur_level=blur_level,
+            burst_id=burst_id
         )
     except Exception as e:
         logger.warning(f"Failed to parse XMP {xmp_path}: {e}")
@@ -906,6 +958,7 @@ def process_photos_batch(
     """
     results = []
     photos_to_process = []
+    used_burst_ids = set()
 
     # Check for existing sidecars
     for photo_path in photos:
@@ -918,6 +971,8 @@ def process_photos_batch(
             analysis = load_analysis_from_xmp(xmp_path, photo_path)
             logger.info(f"Sidecar exists for {photo_path.name}: rating {analysis.rating}, keywords {analysis.keywords}")
             results.append((analysis, xmp_path))
+            if analysis.burst_id:
+                used_burst_ids.add(analysis.burst_id)
         else:
             photos_to_process.append(photo_path)
 
@@ -968,7 +1023,7 @@ def process_photos_batch(
         api_base=api_base, api_key=api_key, model_name=model_name
     )
     
-    for i, burst in enumerate(burst_iterator):
+    for i, (burst, burst_keyword) in enumerate(burst_iterator):
         if stop_event and stop_event.is_set():
             logger.info("Processing cancelled by user.")
             break
@@ -1013,6 +1068,33 @@ def process_photos_batch(
 
         if not burst_analyses:
             continue
+
+        # Determine burst_id
+        if not burst_keyword:
+            # Try primary subject of first photo
+            if burst_analyses[0].primary_subject:
+                burst_keyword = burst_analyses[0].primary_subject
+            else:
+                burst_keyword = "burst"
+        
+        # Sanitize keyword
+        burst_keyword = "".join(c for c in burst_keyword if c.isalnum()).lower()
+        if not burst_keyword:
+            burst_keyword = "burst"
+            
+        # Generate unique ID
+        counter = 1
+        while True:
+            candidate_id = f"{burst_keyword}_{counter:04d}"
+            if candidate_id not in used_burst_ids:
+                burst_id = candidate_id
+                used_burst_ids.add(burst_id)
+                break
+            counter += 1
+            
+        # Assign to all
+        for analysis in burst_analyses:
+            analysis.burst_id = burst_id
 
         # Select best in burst if more than 1 photo
         best_photo = None

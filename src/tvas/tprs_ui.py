@@ -13,7 +13,7 @@ import gc
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 import toga
 from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
@@ -142,6 +142,7 @@ class FocusCheckWindow(toga.Window):
         
         try:
             with Image.open(self.analysis.photo_path) as img:
+                img = ImageOps.exif_transpose(img)
                 if self.analysis.primary_subject_bounding_box:
                     width, height = img.size
                     xmin, ymin, xmax, ymax = self.analysis.primary_subject_bounding_box
@@ -552,6 +553,7 @@ class TprsStatusApp(toga.App):
         """Load an image for preview, resizing it to avoid UI overflow."""
         try:
             with Image.open(path) as img:
+                img = ImageOps.exif_transpose(img)
                 # Resize to max 1920 width/height to prevent massive UI expansion
                 # while maintaining good quality for preview
                 img.thumbnail((1920, 1080))
@@ -623,6 +625,7 @@ class TprsStatusApp(toga.App):
             if analysis.primary_subject_bounding_box and len(analysis.primary_subject_bounding_box) == 4:
                 try:
                     with Image.open(abs_path) as img:
+                        img = ImageOps.exif_transpose(img)
                         # Handle EXIF rotation if needed (PIL usually handles it if we use ImageOps.exif_transpose, 
                         # but for now let's assume basic load. Toga might handle rotation on display, 
                         # but drawing on raw pixels might mismatch if we don't respect EXIF. 
@@ -710,6 +713,7 @@ class TprsStatusApp(toga.App):
         try:
             # Create thumbnail image
             with Image.open(analysis.photo_path) as img:
+                img = ImageOps.exif_transpose(img)
                 img.thumbnail((200, 200))
                 img_byte_arr = io.BytesIO()
                 img.save(img_byte_arr, format=img.format or 'JPEG')
