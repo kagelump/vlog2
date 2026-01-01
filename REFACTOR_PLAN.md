@@ -13,6 +13,7 @@ This document outlines the plan to refactor `src/tvas/tprs.py` to improve code r
 - **Goal**: Remove code duplication for stripping markdown code blocks from JSON responses.
 - **Action**: Extract JSON cleaning logic into a helper function `clean_json_response(text: str) -> str`.
 - **Details**: Replace repeated logic in `are_photos_in_same_burst`, `parse_analysis_response`, `analyze_photo`, and `select_best_in_burst`.
+- **Status**: Completed.
 
 ## 3. Use Context Managers for Temporary Files
 - **Goal**: Simplify resource management and ensure temporary files are always cleaned up.

@@ -247,6 +247,18 @@ class VLMClient:
             return None
 
 
+def clean_json_response(text: str) -> str:
+    """Clean up response text to extract JSON content."""
+    clean_text = text.strip()
+    if clean_text.startswith("```json"):
+        clean_text = clean_text[7:]
+    elif clean_text.startswith("```"):
+        clean_text = clean_text[3:]
+    if clean_text.endswith("```"):
+        clean_text = clean_text[:-3]
+    return clean_text.strip()
+
+
 def are_photos_in_same_burst(
     photo1: Path,
     photo2: Path,
@@ -282,11 +294,7 @@ def are_photos_in_same_burst(
         text = response.text
         
         # Clean JSON
-        clean_text = text.strip()
-        if clean_text.startswith("```json"): clean_text = clean_text[7:]
-        if clean_text.startswith("```"): clean_text = clean_text[3:]
-        if clean_text.endswith("```"): clean_text = clean_text[:-3]
-        clean_text = clean_text.strip()
+        clean_text = clean_json_response(text)
 
         data = json.loads(clean_text)
         return bool(data.get("same_burst", False)), data.get("keyword")
@@ -439,14 +447,7 @@ def expand_bbox(bbox: list[int]) -> list[int]:
 def parse_analysis_response(response_text: str, photo_path: Path, provider: Optional[str] = None) -> Optional[PhotoAnalysis]:
     """Parse JSON response from VLM."""
     # Clean up response text (remove markdown code blocks if present)
-    clean_text = response_text.strip()
-    if clean_text.startswith("```json"):
-        clean_text = clean_text[7:]
-    if clean_text.startswith("```"):
-        clean_text = clean_text[3:]
-    if clean_text.endswith("```"):
-        clean_text = clean_text[:-3]
-    clean_text = clean_text.strip()
+    clean_text = clean_json_response(response_text)
 
     try:
         data = json.loads(clean_text)
@@ -581,11 +582,7 @@ def analyze_photo(
                             
                         if subject_text:
                             # Clean JSON
-                            clean_subject = subject_text.strip()
-                            if clean_subject.startswith("```json"): clean_subject = clean_subject[7:]
-                            if clean_subject.startswith("```"): clean_subject = clean_subject[3:]
-                            if clean_subject.endswith("```"): clean_subject = clean_subject[:-3]
-                            clean_subject = clean_subject.strip()
+                            clean_subject = clean_json_response(subject_text)
                             
                             try:
                                 subject_data = json.loads(clean_subject)
@@ -888,11 +885,7 @@ def select_best_in_burst(
         response_text = response.text if response else None
             
         # Clean JSON
-        clean_text = response_text.strip()
-        if clean_text.startswith("```json"): clean_text = clean_text[7:]
-        if clean_text.startswith("```"): clean_text = clean_text[3:]
-        if clean_text.endswith("```"): clean_text = clean_text[:-3]
-        clean_text = clean_text.strip()
+        clean_text = clean_json_response(response_text)
         
         try:
             data = json.loads(clean_text)
