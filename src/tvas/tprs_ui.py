@@ -563,9 +563,9 @@ class TprsStatusApp(toga.App):
                         bottom = int((ymax / 1000) * height)
                         
                         # Draw red rectangle
-                        outline_color = "green"
+                        outline_color = "#00FF00" # Lime
                         if analysis.blur_level == 1:
-                            outline_color = "yellow"
+                            outline_color = "#FFA500" # Orange
                         elif analysis.blur_level == 2:
                             outline_color = "red"
                         draw.rectangle([left, top, right, bottom], outline=outline_color, width=5)
