@@ -34,7 +34,8 @@ or you simply prefer faster processing, you can use a cloud provider.
     echo "sk-or-..." > ~/.openrouterkey
     ```
 4.  **Configure Providers**: Go to [preferences](https://openrouter.ai/settings/preferences) and add `Together` and `DeepInfra` to **Ignored Providers** (to avoid reliability issues).
-5.  **Run TPRS**:  
+5.  **Install uv**: As per [official instructions](https://docs.astral.sh/uv/getting-started/installation/)
+6.  **Run TPRS**:  
     ```shell
     uvx --from git+https://github.com/kagelump/vlog2 tprs --openrouter
     ``` 
