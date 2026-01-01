@@ -17,7 +17,7 @@ import toga
 from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
 
-from tvas.tprs import PhotoAnalysis, process_photos_batch, find_jpeg_photos
+from tvas.tprs import PhotoAnalysis, process_photos_batch, find_jpeg_photos, load_analysis_from_xmp
 from tvas import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override
 
 # Configure logging to capture everything
@@ -327,12 +327,56 @@ class TprsStatusApp(toga.App):
     async def auto_start_analysis(self, app):
         """Automatically start analysis if directory is provided."""
         await asyncio.sleep(0.5) # Give UI time to appear
+        await self.load_existing_xmps()
         await self.start_analysis(self.start_button)
     
     def open_settings(self, widget):
         """Open the settings window."""
         settings_window = SettingsWindow(self)
         settings_window.show()
+
+    async def load_existing_xmps(self):
+        """Load existing XMP files for photos in the directory."""
+        if not self.directory:
+            return
+
+        self.status_label.text = "Checking for existing XMP files..."
+        
+        # Run in executor to avoid blocking UI during file I/O
+        loop = asyncio.get_running_loop()
+        
+        def _load():
+            photos = find_jpeg_photos(self.directory)
+            loaded = []
+            for photo_path in photos:
+                if self.output_dir:
+                    xmp_path = self.output_dir / f"{photo_path.stem}.xmp"
+                else:
+                    xmp_path = photo_path.with_suffix(".xmp")
+                
+                if xmp_path.exists():
+                    try:
+                        analysis = load_analysis_from_xmp(xmp_path, photo_path)
+                        loaded.append(analysis)
+                    except Exception as e:
+                        logger.warning(f"Failed to load XMP for {photo_path}: {e}")
+            return loaded
+
+        existing_analyses = await loop.run_in_executor(None, _load)
+        
+        if existing_analyses:
+            logger.info(f"Loaded {len(existing_analyses)} existing XMP files.")
+            self.status_label.text = f"Loaded {len(existing_analyses)} existing XMP files."
+            
+            # Add to recent strip
+            # We add them in order, so the last one in the list (lexicographically last)
+            # ends up at the start of the strip (most recent).
+            for analysis in existing_analyses:
+                self.add_recent_photo(analysis)
+                # Yield to event loop to keep UI responsive if many items
+                await asyncio.sleep(0.01)
+        else:
+            self.status_label.text = "No existing XMP files found."
 
     async def select_folder(self, widget):
         """Handle folder selection."""
@@ -348,6 +392,9 @@ class TprsStatusApp(toga.App):
                 self.start_button.enabled = True
                 self.status_label.text = "Folder selected. Click Start Analysis to begin."
                 logger.info(f"Selected folder: {self.directory}")
+                
+                # Load existing XMPs
+                await self.load_existing_xmps()
         except Exception as e:
             logger.error(f"Error selecting folder: {e}")
             self.status_label.text = f"Error selecting folder. Please try again."
