@@ -214,7 +214,7 @@ def are_photos_in_same_burst(
             else:
                 text = str(response)
         
-        data = json.loads(clean_text)
+        data = json.loads(text)
         return bool(data.get("same_burst", False))
         
     except Exception as e:
