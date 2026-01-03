@@ -88,5 +88,9 @@ venv.bak/
 *.MTS
 .cache/
 
+# Generated transcription files
+*.srt
+*_whisper.json
+
 # Logs
 *.log
