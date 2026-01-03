@@ -19,6 +19,7 @@ from tvas.analysis import analyze_clips_batch
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
 from shared.proxy import generate_proxies_batch
 from tvas.timeline import TimelineConfig, create_timeline_from_analysis, export_analysis_json
+from tvas.transcribe import transcribe_clips_batch
 from tvas.watcher import VolumeWatcher, check_watchdog_available, find_camera_volumes, is_camera_volume
 
 # Configure logging
@@ -121,6 +122,28 @@ class TVASApp:
         except Exception as e:
             results["errors"].append(f"Edit proxy generation failed: {e}")
             logger.error(f"Edit proxy generation failed: {e}")
+
+        # Stage 2.5: Transcription (runs before analysis)
+        logger.info("Stage 2.5: Transcribing clips...")
+        clips_to_transcribe: list[tuple[Path, Path | None]] = [
+            (r.source_path, r.proxy_path) for r in edit_proxy_results if r.success and r.proxy_path
+        ]
+
+        # Add any existing proxies in the directory that weren't just generated/processed
+        if proxy_dir.exists():
+            current_proxies = {p for _, p in clips_to_transcribe if p}
+            for proxy_file in proxy_dir.glob("*.mp4"):
+                if proxy_file not in current_proxies:
+                    logger.info(f"Found existing proxy for transcription: {proxy_file.name}")
+                    clips_to_transcribe.append((proxy_file, proxy_file))
+
+        try:
+            transcription_results = transcribe_clips_batch(clips_to_transcribe)
+            successful_transcriptions = sum(1 for r in transcription_results if r.success)
+            logger.info(f"Transcribed {successful_transcriptions}/{len(transcription_results)} clips")
+        except Exception as e:
+            # Transcription is optional - log warning but continue
+            logger.warning(f"Transcription failed: {e}")
 
         # Stage 3: AI Analysis (uses edit proxies)
         logger.info("Stage 3: Analyzing clips...")
