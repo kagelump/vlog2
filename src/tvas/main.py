@@ -550,7 +550,7 @@ Examples:
         api_base = "https://openrouter.ai/api/v1"
         args.api_key = get_openrouter_api_key(args.api_key)
         if not args.model or args.model == DEFAULT_VLM_MODEL:
-            args.model = "qwen/qwen3-vl-235b-a22b-instruct"
+            args.model = "google/gemini-2.5-flash-lite"
     elif args.lmstudio:
         api_base = "http://localhost:1234/v1"
 
