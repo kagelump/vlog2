@@ -7,12 +7,12 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
-from tvas.tprs import (
-    DEFAULT_VLM_MODEL,
+from tprs.tprs import (
     PhotoAnalysis,
     find_jpeg_photos,
     generate_xmp_sidecar,
 )
+from shared import DEFAULT_VLM_MODEL
 
 
 class TestFindJpegPhotos:

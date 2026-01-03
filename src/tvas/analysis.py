@@ -21,8 +21,8 @@ from mlx_vlm.video_generate import generate
 from mlx_vlm import generate as mlx_vlm_generate
 from mlx_vlm import load
 
-from tvas.proxy import get_video_duration
-from tvas import load_prompt, DEFAULT_VLM_MODEL
+from shared.proxy import get_video_duration
+from shared import load_prompt, DEFAULT_VLM_MODEL
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

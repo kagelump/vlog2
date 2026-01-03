@@ -22,7 +22,7 @@ from xml.etree import ElementTree as ET
 
 from PIL import Image, ExifTags
 
-from tvas import load_prompt, DEFAULT_VLM_MODEL
+from shared import load_prompt, DEFAULT_VLM_MODEL
 
 logger = logging.getLogger(__name__)
 

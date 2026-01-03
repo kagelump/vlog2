@@ -13,8 +13,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from tvas import DEFAULT_VLM_MODEL
-from tvas.tprs import (
+from shared import DEFAULT_VLM_MODEL
+from tprs.tprs import (
     find_jpeg_photos,
     process_photos_batch,
 )
@@ -204,7 +204,7 @@ Examples:
 
     # Default to GUI mode unless --headless is specified
     if not args.headless:
-        from tvas.tprs_ui import main as ui_main
+        from tprs.ui import main as ui_main
         app = ui_main(args.directory, args.output, args.model, args.api_base, args.api_key)
         app.main_loop()
         sys.exit(0)

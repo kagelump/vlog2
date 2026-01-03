@@ -3,16 +3,16 @@ import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
-from tvas import tprs_cli
+from tprs import cli as tprs_cli
 
 def test_openrouter_headless_args():
     """Test --openrouter in headless mode."""
     with patch('sys.argv', ['tprs', '.', '--headless', '--openrouter']), \
-         patch('tvas.tprs_cli.check_lmstudio_running', return_value=False), \
+         patch('tprs.cli.check_lmstudio_running', return_value=False), \
          patch('pathlib.Path.exists', return_value=True), \
          patch('pathlib.Path.read_text', return_value="sk-test-key"), \
-         patch('tvas.tprs_cli.find_jpeg_photos', return_value=['photo.jpg']), \
-         patch('tvas.tprs_cli.process_photos_batch') as mock_process:
+         patch('tprs.cli.find_jpeg_photos', return_value=['photo.jpg']), \
+         patch('tprs.cli.process_photos_batch') as mock_process:
         
         # Mock Path.home() to avoid reading real file
         with patch('pathlib.Path.home', return_value=Path('/tmp')):

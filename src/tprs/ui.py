@@ -19,8 +19,8 @@ import toga
 from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
 
-from tvas.tprs import PhotoAnalysis, process_photos_batch, find_jpeg_photos, load_analysis_from_xmp
-from tvas import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override
+from tprs.tprs import PhotoAnalysis, process_photos_batch, find_jpeg_photos, load_analysis_from_xmp
+from shared import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override
 
 # Configure logging to capture everything
 logger = logging.getLogger(__name__)

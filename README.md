@@ -2,8 +2,8 @@
 
 A set of tools to help with travel videos and photos, including:
 
-* TVAS - Process vidoes for da vinci resolve
-* TPRS - Process photos for lightroom or dxo photolab
+* TVAS - Process videos for DaVinci Resolve
+* TPRS - Process photos for Lightroom or DxO PhotoLab
 
 ## TPRS Quickstart (Recommended with LM Studio)
 
@@ -201,7 +201,7 @@ After running `tprs`, the XMP sidecar files will be created next to your photos.
 3. Descriptions appear in the metadata
 4. You can search for keywords like "Sunset", "Cat", or "Blurry" to find photos without looking at them
 
-## Project Structure
+## Output Folder Structure
 
 ```
 ~/Movies/Vlog/
@@ -228,6 +228,14 @@ After running `tprs`, the XMP sidecar files will be created next to your photos.
 | `--model` | mlx-vlm model for VLM | `mlx-community/Qwen3-VL-8B-Instruct-8bit` |
 
 ## Development
+
+### Source Code Structure
+
+The project is organized into three main modules:
+
+- **`src/tvas/`**: Travel Vlog Automation System (video processing, ingestion, timeline generation)
+- **`src/tprs/`**: Travel Photo Rating System (photo analysis, rating, metadata generation)
+- **`src/shared/`**: Shared utilities and prompts used by both systems
 
 ### Run Tests
 

@@ -31,13 +31,14 @@ echo "Found mlx.metallib at: $MLX_METALLIB"
 echo -e "${GREEN}Building TVAS executable...${NC}"
 pyinstaller --noconfirm --clean \
     --name tvas \
-    --add-data "src/tvas/prompts/*.txt:tvas/prompts" \
+    --add-data "src/shared/prompts/*.txt:shared/prompts" \
     --add-data "$MLX_METALLIB:." \
     --collect-all mlx \
     --collect-all mlx_vlm \
     --collect-all toga \
     --hidden-import=tvas \
     --hidden-import=tvas.main \
+    --hidden-import=shared \
     src/tvas/main.py
 
 # Find HuggingFace cache directory
@@ -75,14 +76,15 @@ pyinstaller --noconfirm --clean \
     --windowed \
     --icon "$ICON_PATH" \
     --osx-bundle-identifier=com.kagelump.tprs \
-    --add-data "src/tvas/prompts/*.txt:tvas/prompts" \
+    --add-data "src/shared/prompts/*.txt:shared/prompts" \
     --add-data "$MLX_METALLIB:." \
     --collect-all mlx \
     --collect-all mlx_vlm \
     --collect-all toga \
-    --hidden-import=tvas \
-    --hidden-import=tvas.tprs_cli \
-    src/tvas/tprs_cli.py
+    --hidden-import=tprs \
+    --hidden-import=tprs.cli \
+    --hidden-import=shared \
+    src/tprs/cli.py
 
 # Create the distribution folder
 DIST_NAME="tvas_release"

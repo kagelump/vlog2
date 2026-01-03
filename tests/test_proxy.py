@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tvas.proxy import (
+from shared.proxy import (
     ProxyConfig,
     ProxyType,
     build_ai_proxy_command,

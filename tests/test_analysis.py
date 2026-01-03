@@ -7,9 +7,9 @@ import pytest
 
 from tvas.analysis import (
     ConfidenceLevel,
-    DEFAULT_VLM_MODEL,
     check_model_available,
 )
+from shared import DEFAULT_VLM_MODEL
 
 
 class TestModelAvailability:
