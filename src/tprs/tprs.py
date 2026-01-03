@@ -23,13 +23,9 @@ from xml.etree import ElementTree as ET
 from PIL import Image, ExifTags
 
 from shared import load_prompt, DEFAULT_VLM_MODEL
+from shared.vlm_client import VLMClient, VLMResponse
 
 logger = logging.getLogger(__name__)
-
-# mlx-vlm is required
-from mlx_vlm import load, generate
-from mlx_vlm.prompt_utils import apply_chat_template
-from mlx_vlm.utils import load_config
 
 
 @dataclass
@@ -52,11 +48,7 @@ class PhotoAnalysis:
     subject_sharpness_check_reason: Optional[str] = None
 
 
-@dataclass
-class VLMResponse:
-    """Response from VLM API."""
-    text: str
-    provider: Optional[str] = None
+
 
 
 def find_jpeg_photos(directory: Path) -> list[Path]:
@@ -104,149 +96,7 @@ def get_capture_time(image_path: Path) -> datetime:
         return datetime.fromtimestamp(image_path.stat().st_mtime)
 
 
-class VLMClient:
-    """Client for interacting with Vision Language Models (local or API)."""
 
-    def __init__(
-        self,
-        model_name: str = "local-model",
-        api_base: Optional[str] = None,
-        api_key: Optional[str] = None,
-        provider_preferences: Optional[str] = None
-    ):
-        self.model_name = model_name
-        self.api_base = api_base
-        self.api_key = api_key
-        self.provider_preferences = provider_preferences
-        self.model = None
-        self.processor = None
-        self.config = None
-
-        if not self.api_base:
-            self._load_local_model()
-
-    def _load_local_model(self):
-        """Load the local mlx-vlm model."""
-        try:
-            logger.info(f"Loading mlx-vlm model: {self.model_name}")
-            self.model, self.processor = load(self.model_name, trust_remote_code=True)
-            self.config = load_config(self.model_name, trust_remote_code=True)
-        except Exception as e:
-            logger.error(f"Failed to load model {self.model_name}: {e}")
-            raise
-
-    def generate(
-        self,
-        prompt: str,
-        image_paths: list[Path],
-        max_tokens: int = 1000,
-        temperature: float = 0.7
-    ) -> Optional[VLMResponse]:
-        """Generate response from VLM."""
-        if self.api_base:
-            return self._call_api(prompt, image_paths, max_tokens, temperature)
-        else:
-            return self._generate_local(prompt, image_paths, max_tokens, temperature)
-
-    def _call_api(
-        self,
-        prompt: str,
-        image_paths: list[Path],
-        max_tokens: int,
-        temperature: float
-    ) -> Optional[VLMResponse]:
-        """Call a VLM API (OpenAI compatible)."""
-        try:
-            messages_content = [{"type": "text", "text": prompt}]
-            
-            for image_path in image_paths:
-                with open(image_path, "rb") as image_file:
-                    base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-                    messages_content.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
-                    })
-
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            payload = {
-                "model": self.model_name, 
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": messages_content
-                    }
-                ],
-                "max_tokens": max_tokens,
-                "temperature": temperature
-            }
-
-            if self.provider_preferences:
-                # Handle comma-separated list
-                providers = [p.strip() for p in self.provider_preferences.split(",") if p.strip()]
-                if providers:
-                    payload["provider"] = {"order": providers}
-            
-            req = urllib.request.Request(
-                f"{self.api_base}/chat/completions",
-                data=json.dumps(payload).encode('utf-8'),
-                headers=headers,
-                method="POST"
-            )
-            
-            with urllib.request.urlopen(req) as response:
-                response_data = json.loads(response.read().decode('utf-8'))
-                logging.info(f"VLM Request: API response: {response_data}")
-                text = response_data['choices'][0]['message']['content']
-                provider = response_data.get('provider')
-                return VLMResponse(text=text, provider=provider)
-
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode('utf-8')
-            logger.error(f"API call failed with HTTP {e.code}: {e.reason}")
-            logger.error(f"Server response: {error_body}")
-            return None
-        except Exception as e:
-            logger.error(f"API call failed: {e}")
-            return None
-
-    def _generate_local(
-        self,
-        prompt: str,
-        image_paths: list[Path],
-        max_tokens: int,
-        temperature: float
-    ) -> Optional[VLMResponse]:
-        try:
-            image_paths_str = [str(p) for p in image_paths]
-            formatted_prompt = apply_chat_template(
-                self.processor, self.config, prompt, num_images=len(image_paths)
-            )
-            
-            response = generate(
-                self.model,
-                self.processor,
-                formatted_prompt,
-                image_paths_str,
-                verbose=False,
-                max_tokens=max_tokens,
-                temp=temperature
-            )
-            
-            if hasattr(response, "text"):
-                text = response.text
-            else:
-                text = str(response)
-            
-            return VLMResponse(text=text, provider="mlx-vlm")
-        except Exception as e:
-            logger.error(f"Local generation failed: {e}")
-            return None
 
 
 def clean_json_response(text: str) -> str:
@@ -778,7 +628,7 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
         
         # Rating
         rating_elem = root.find(".//xmp:Rating", namespaces)
-        if rating_elem is not None and rating_elem.text.isdigit():
+        if rating_elem is not None and rating_elem.text and rating_elem.text.isdigit():
             rating = int(rating_elem.text)
             
         # Keywords
@@ -892,7 +742,10 @@ def select_best_in_burst(
             image_paths=image_paths,
             max_tokens=100
         )
-        response_text = response.text if response else None
+        if not response or not response.text:
+            return candidates[0]
+
+        response_text = response.text
             
         # Clean JSON
         clean_text = clean_json_response(response_text)
@@ -926,7 +779,7 @@ def process_photos_batch(
     photos: list[Path],
     model_name: str = DEFAULT_VLM_MODEL,
     output_dir: Optional[Path] = None,
-    status_callback: Optional[Callable[[int, int, Optional[Path], Optional[PhotoAnalysis], Optional[Path]], None]] = None,
+    status_callback: Optional[Callable[[int, int, Optional[Path], Optional[PhotoAnalysis]], None]] = None,
     stop_event: Optional[threading.Event] = None,
     api_base: Optional[str] = None,
     api_key: str = "lm-studio",

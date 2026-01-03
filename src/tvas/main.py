@@ -9,6 +9,7 @@ import logging
 import signal
 import sys
 import time
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,9 @@ class TVASApp:
         use_vlm: bool = True,
         vlm_model: str = DEFAULT_VLM_MODEL,
         auto_approve: bool = False,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        provider_preferences: str | None = None,
     ):
         """Initialize the TVAS application.
 
@@ -47,6 +51,9 @@ class TVASApp:
             use_vlm: Whether to use VLM for analysis.
             vlm_model: mlx-vlm model name for VLM.
             auto_approve: Auto-approve all AI decisions without UI.
+            api_base: Base URL for VLM API (e.g. OpenRouter or LM Studio).
+            api_key: API key for VLM API.
+            provider_preferences: Comma-separated list of preferred providers (for OpenRouter).
         """
         # Auto-detect ACASIS volume for archival
         if archival_path is None:
@@ -64,6 +71,9 @@ class TVASApp:
         self.use_vlm = use_vlm
         self.vlm_model = vlm_model
         self.auto_approve = auto_approve
+        self.api_base = api_base
+        self.api_key = api_key
+        self.provider_preferences = provider_preferences
         self.watcher: VolumeWatcher | None = None
         self._running = False
 
@@ -129,6 +139,9 @@ class TVASApp:
                 clips_to_analyze,
                 use_vlm=self.use_vlm,
                 model_name=self.vlm_model,
+                api_base=self.api_base,
+                api_key=self.api_key,
+                provider_preferences=self.provider_preferences,
             )
             results["clips_analyzed"] = len(analyses)
 
@@ -420,6 +433,36 @@ Examples:
     )
 
     parser.add_argument(
+        "--api-base",
+        type=str,
+        help="Base URL for VLM API (e.g. https://openrouter.ai/api/v1)",
+    )
+
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        help="API key for VLM API",
+    )
+
+    parser.add_argument(
+        "--openrouter",
+        action="store_true",
+        help="Use OpenRouter API (sets default base URL)",
+    )
+
+    parser.add_argument(
+        "--lmstudio",
+        action="store_true",
+        help="Use LM Studio local server (sets default base URL)",
+    )
+
+    parser.add_argument(
+        "--provider",
+        type=str,
+        help="Preferred provider(s) for OpenRouter (comma-separated)",
+    )
+
+    parser.add_argument(
         "--auto-approve",
         action="store_true",
         help="Auto-approve all AI decisions (skip UI)",
@@ -437,12 +480,24 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Handle API configuration shortcuts
+    api_base = args.api_base
+    if args.openrouter:
+        api_base = "https://openrouter.ai/api/v1"
+        if not args.api_key and "OPENROUTER_API_KEY" in os.environ:
+            args.api_key = os.environ["OPENROUTER_API_KEY"]
+    elif args.lmstudio:
+        api_base = "http://localhost:1234/v1"
+
     app = TVASApp(
         archival_path=args.archival_path,
         proxy_path=args.proxy_path,
         use_vlm=not args.no_vlm,
         vlm_model=args.model,
         auto_approve=args.auto_approve,
+        api_base=api_base,
+        api_key=args.api_key,
+        provider_preferences=args.provider,
     )
 
     if args.watch:

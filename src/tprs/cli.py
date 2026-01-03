@@ -18,6 +18,7 @@ from tprs.tprs import (
     find_jpeg_photos,
     process_photos_batch,
 )
+from shared.vlm_client import check_lmstudio_running
 
 # Configure logging
 logging.basicConfig(
@@ -27,38 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def check_lmstudio_running():
-    """Check if LM Studio is running locally, or try to start it."""
-    # Check if already running
-    try:
-        with urllib.request.urlopen("http://localhost:1234/v1/models", timeout=0.2) as response:
-            if response.status == 200:
-                return True
-    except Exception:
-        pass
 
-    # Try to start via lms CLI
-    try:
-        logger.info("LM Studio server not detected. Attempting to start via 'lms server start'...")
-        # Start in background
-        subprocess.Popen(["lms", "server", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        # Wait up to 5 seconds for it to become available
-        for _ in range(10):
-            time.sleep(0.5)
-            try:
-                with urllib.request.urlopen("http://localhost:1234/v1/models", timeout=0.2) as response:
-                    if response.status == 200:
-                        logger.info("LM Studio server started successfully.")
-                        return True
-            except Exception:
-                pass
-    except FileNotFoundError:
-        logger.debug("'lms' command not found.")
-    except Exception as e:
-        logger.debug(f"Failed to start LM Studio: {e}")
-
-    return False
 
 
 def main():
