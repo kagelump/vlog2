@@ -19,7 +19,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 4.  **Run TPRS**:  
 ```shell
-uvx --from git+https://github.com/kagelump/vlog2 tprs
+uvx --from tvas tprs
 ```
 
 ### Running with OpenRouter instead of LM Studio
