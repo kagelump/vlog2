@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 import time
@@ -71,7 +72,8 @@ class ClipAnalysis:
     subject_keywords: list[str] | None = None
     action_keywords: list[str] | None = None
     timestamp: float = 0.0
-
+    created_timestamp: str | None = None  # File creation timestamp (YYYY-MM-DD HH:MM:SS)
+    modified_timestamp: str | None = None  # File modification timestamp (YYYY-MM-DD HH:MM:SS)
 def validate_model_output(parsed: Any) -> dict:
     """Validate parsed JSON from the model against DescribeOutput.
 
@@ -290,22 +292,39 @@ def analyze_clip(
                  f"  Description: {vlm_result.get('clip_description')}\n"
                  f"  Name: {vlm_result.get('clip_name')}")
             
-            # Save result to JSON
+            # Save result to JSON with metadata
             try:
+                # Get file timestamps
+                stat_info = source_path.stat()
+                created_ts = stat_info.st_birthtime if hasattr(stat_info, 'st_birthtime') else stat_info.st_ctime
+                modified_ts = stat_info.st_mtime
+                
+                json_data = vlm_result.copy()
+                json_data["metadata"] = {
+                    "duration_seconds": duration,
+                    "created_timestamp": datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                    "modified_timestamp": datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                    "analysis_timestamp": datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S"),
+                }
                 with open(json_path, "w") as f:
-                    json.dump(vlm_result, f, indent=2)
+                    json.dump(json_data, f, indent=2)
             except Exception as e:
                 logger.warning(f"Failed to save analysis to {json_path}: {e}")
         except Exception as e:
             logger.error(f"Analysis failed{progress_str} for {video_to_analyze.name}: {e}")
             # Return a failed analysis with proper context preserved
+            stat_info = source_path.stat()
+            created_ts = stat_info.st_birthtime if hasattr(stat_info, 'st_birthtime') else stat_info.st_ctime
+            modified_ts = stat_info.st_mtime
             return ClipAnalysis(
                 source_path=source_path,
                 proxy_path=proxy_path,
                 duration_seconds=duration,
                 confidence=ConfidenceLevel.LOW,
                 vlm_summary=f"Analysis failed: {e}",
-                timestamp=source_path.stat().st_mtime,
+                timestamp=modified_ts,
+                created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
             )
 
     # Extract clip name from VLM suggestions
@@ -329,6 +348,11 @@ def analyze_clip(
         else:
             confidence = ConfidenceLevel.MEDIUM
 
+    # Get file timestamps
+    stat_info = source_path.stat()
+    created_ts = stat_info.st_birthtime if hasattr(stat_info, 'st_birthtime') else stat_info.st_ctime
+    modified_ts = stat_info.st_mtime
+    
     return ClipAnalysis(
         source_path=source_path,
         proxy_path=proxy_path,
@@ -342,7 +366,9 @@ def analyze_clip(
         vlm_summary=vlm_result.get("trim_reason"),
         subject_keywords=vlm_result.get("subject_keywords", []),
         action_keywords=vlm_result.get("action_keywords", []),
-        timestamp=source_path.stat().st_mtime,
+        timestamp=modified_ts,
+        created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
+        modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
     )
 
 
@@ -431,13 +457,18 @@ def analyze_clips_batch(
                 except Exception as e:
                     logger.error(f"Clip {index + 1}/{len(clips)} ({source_path.name}) failed: {e}")
                     # Create a failed result preserving original context
+                    stat_info = source_path.stat()
+                    created_ts = stat_info.st_birthtime if hasattr(stat_info, 'st_birthtime') else stat_info.st_ctime
+                    modified_ts = stat_info.st_mtime
                     results_map[index] = ClipAnalysis(
                         source_path=source_path,
                         proxy_path=proxy_path,
                         duration_seconds=0,
                         confidence=ConfidenceLevel.LOW,
                         vlm_summary=f"Analysis failed: {e}",
-                        timestamp=source_path.stat().st_mtime,
+                        timestamp=modified_ts,
+                        created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                        modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
                     )
                 
                 if completed_count % max(1, len(clips) // 10) == 0 or completed_count == len(clips):

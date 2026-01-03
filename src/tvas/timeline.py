@@ -222,6 +222,10 @@ def export_analysis_json(
             "vlm_response": analysis.vlm_response,
             "vlm_summary": analysis.vlm_summary,
             "timestamp": analysis.timestamp,
+            "metadata": {
+                "created_timestamp": analysis.created_timestamp,
+                "modified_timestamp": analysis.modified_timestamp,
+            },
         }
         data["clips"].append(clip_data)
 
