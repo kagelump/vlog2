@@ -18,10 +18,13 @@ wide: Shows the subject and significant background context.
 Describe this video clip using 1-2 sentences. Then give it a short name to use as a filename. Use snake_case.
 
 Respond in JSON format with the following fields:
+- trim: Boolean describing whether or not trim is needed.
 - start_sec: Suggested start time in seconds (float) or null if no trim needed.
 - end_sec: Suggested end time in seconds (float) or null if no trim needed.
 - trim_reason: A brief explanation of your trim suggestions.
 - shot_type: The primary shot type (pov, insert, establishing).
 - shot_tags: A list of descriptive tags (static, dynamic, closeup, medium, wide).
+- subject_keywords: A list of keywords describing subjects, scenes, environment, etc.
+- action_keywords: A list of keywords describing what is happening in the video.
 - clip_description: A short summary of the clip's content.
 - clip_name: A concise name (2-5 words) for the clip based on its content in lower_snake_case.

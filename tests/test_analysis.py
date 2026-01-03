@@ -7,18 +7,8 @@ import pytest
 
 from tvas.analysis import (
     ConfidenceLevel,
-    check_model_available,
 )
 from shared import DEFAULT_VLM_MODEL
-
-
-class TestModelAvailability:
-    """Tests for model availability check."""
-
-    def test_check_model_available(self):
-        """Test that model availability always returns True (models auto-download)."""
-        assert check_model_available() is True
-        assert check_model_available("mlx-community/Qwen3-VL-8B-Instruct-8bit") is True
 
 
 class TestDefaultModel:

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 VIDEO_FPS = 10.0  # Sample at 10fps for analysis
 VIDEO_SEGMENT_DURATION = 5.0  # Analyze first/last 5 seconds
 
-TRIM_DETECTION_PROMPT = load_prompt("trim_detection.txt")
+VIDEO_ANALYSIS_PROMPT = load_prompt("video_analysis.txt")
 
 class ConfidenceLevel(Enum):
     """Confidence level of trim detection."""
@@ -43,6 +43,8 @@ class DescribeOutput(BaseModel):
     trim_reason: str  | None
     shot_type: str
     shot_tags: list[str]
+    subject_keywords: list[str]
+    action_keywords: list[str]
     clip_description: str
     clip_name: str
 
@@ -59,6 +61,8 @@ class ClipAnalysis:
     suggested_out_point: float | None = None
     vlm_response: str | None = None
     vlm_summary: str | None = None
+    subject_keywords: list[str] | None = None
+    action_keywords: list[str] | None = None
     timestamp: float = 0.0
 
 def validate_model_output(parsed: Any) -> dict:
@@ -118,7 +122,7 @@ def analyze_video_segment(
         pass
 
     response = client.generate_from_video(
-        prompt=TRIM_DETECTION_PROMPT,
+        prompt=VIDEO_ANALYSIS_PROMPT,
         video_path=video_path,
         fps=fps,
         max_pixels=max_pixels
@@ -208,6 +212,8 @@ def analyze_clip(
                  f"  In/Out: {vlm_result.get('start_sec')}s to {vlm_result.get('end_sec')}s\n"
                  f"  Reason: {vlm_result.get('trim_reason')}\n"
                  f"  Shot Type/Tags: {vlm_result.get('shot_type')} ({', '.join(vlm_result.get('shot_tags', []))})\n"
+                 f"  Subjects: {', '.join(vlm_result.get('subject_keywords', []))}\n"
+                 f"  Actions: {', '.join(vlm_result.get('action_keywords', []))}\n"
                  f"  Description: {vlm_result.get('clip_description')}\n"
                  f"  Name: {vlm_result.get('clip_name')}")
             
@@ -253,6 +259,8 @@ def analyze_clip(
         suggested_out_point=trim_end,
         vlm_response=vlm_result.get("clip_description"),
         vlm_summary=vlm_result.get("trim_reason"),
+        subject_keywords=vlm_result.get("subject_keywords", []),
+        action_keywords=vlm_result.get("action_keywords", []),
         timestamp=source_path.stat().st_mtime,
     )
 

@@ -108,6 +108,8 @@ def build_edit_proxy_command(
         "-b:v", "6000k",
         "-allow_sw", "1",
         "-c:a", "copy",
+        "-map_metadata", "0",
+        "-movflags", "use_metadata_tags",
         str(output_path),
     ]
     return cmd
@@ -181,6 +183,12 @@ def generate_proxy(
         duration = time.time() - start_time
 
         if result.returncode == 0 and output_path.exists():
+            # Copy file timestamps (mtime, atime) from source to proxy
+            try:
+                shutil.copystat(source_path, output_path)
+            except Exception as e:
+                logger.warning(f"Failed to copy timestamps for {output_path.name}: {e}")
+
             logger.info(f"Successfully generated proxy in {duration:.1f}s: {output_path.name}")
             return ProxyResult(
                 source_path=source_path,
