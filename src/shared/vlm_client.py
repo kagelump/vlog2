@@ -108,7 +108,8 @@ class VLMClient:
         fps: float = 1.0,
         max_tokens: int = 1000,
         temperature: float = 0.7,
-        max_pixels: int = 224 * 224
+        max_pixels: int = 224 * 224,
+        transcription: Optional[str] = None
     ) -> Optional[VLMResponse]:
         """Generate response from VLM using a video file."""
         if self.api_base:
@@ -123,10 +124,11 @@ class VLMClient:
                 max_tokens, 
                 temperature, 
                 is_base64=True,
-                media_type="video/mp4"
+                media_type="video/mp4",
+                transcription=transcription
             )
         else:
-            return self._generate_local_video(prompt, video_path, fps, max_tokens, temperature, max_pixels)
+            return self._generate_local_video(prompt, video_path, fps, max_tokens, temperature, max_pixels, transcription)
 
     def _process_video_ffmpeg(self, video_path: Path, fps: float) -> Optional[str]:
         """Process video using ffmpeg and return base64 string."""
@@ -185,11 +187,15 @@ class VLMClient:
         max_tokens: int,
         temperature: float,
         is_base64: bool = False,
-        media_type: str = "image/jpeg"
+        media_type: str = "image/jpeg",
+        transcription: Optional[str] = None
     ) -> Optional[VLMResponse]:
         """Call a VLM API (OpenAI compatible)."""
         try:
             messages_content: List[dict[str, Any]] = [{"type": "text", "text": prompt}]
+            
+            if transcription:
+                messages_content.append({"type": "text", "text": f"Transcription:\n{transcription}"})
             
             for item in media_items:
                 if is_base64:
@@ -246,6 +252,9 @@ class VLMClient:
             with urllib.request.urlopen(req) as response:
                 response_data = json.loads(response.read().decode('utf-8'))
                 logging.debug(f"VLM Request: API response: {response_data}")
+                if 'error' in response_data:
+                    logger.error(f"API error: {response_data['error']}")
+                    return None
                 text = response_data['choices'][0]['message']['content']
                 provider = response_data.get('provider')
                 return VLMResponse(text=text, provider=provider)
@@ -303,25 +312,31 @@ class VLMClient:
         fps: float,
         max_tokens: int,
         temperature: float,
-        max_pixels: int
+        max_pixels: int,
+        transcription: Optional[str] = None
     ) -> Optional[VLMResponse]:
         try:
             if not self.model or not self.processor:
                 logger.error("Model not loaded")
                 return None
 
+            content = [
+                {
+                    "type": "video",
+                    "video": str(video_path),
+                    "fps": fps,
+                    "max_pixels": max_pixels,
+                },
+                {"type": "text", "text": prompt},
+            ]
+            
+            if transcription:
+                content.append({"type": "text", "text": f"Transcription:\n{transcription}"})
+
             messages = [
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "video",
-                            "video": str(video_path),
-                            "fps": fps,
-                            "max_pixels": max_pixels,
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
+                    "content": content,
                 }
             ]
 

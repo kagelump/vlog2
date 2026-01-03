@@ -29,5 +29,6 @@ Respond in JSON format with the following fields:
 - subject_keywords: A list of keywords describing subjects, scenes, environment, etc.
 - action_keywords: A list of keywords describing what is happening in the video.
 - clip_description: A short summary of the clip's content.
+- audio_description: A description of the audio content (e.g. "ambient noise", "dialogue", "music", "silence", "lecture").
 - clip_name: A concise name (2-5 words) for the clip based on its content in lower_snake_case.
 - thumbnail_timestamp_sec: The timestamp in seconds (float) of the best thumbnail frame.

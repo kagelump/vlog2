@@ -19,6 +19,7 @@ from threading import Lock
 from shared.proxy import get_video_duration
 from shared import load_prompt, DEFAULT_VLM_MODEL
 from shared.vlm_client import VLMClient
+from tvas.transcribe import run_transcribe
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -26,9 +27,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 logger = logging.getLogger(__name__)
 
 # Video sampling parameters
-VIDEO_FPS = 10.0  # Sample at 10fps for analysis
-VIDEO_SEGMENT_DURATION = 5.0  # Analyze first/last 5 seconds
-
+VIDEO_FPS = 4.0  # Sample at 4fps for analysis
 VIDEO_ANALYSIS_PROMPT = load_prompt("video_analysis.txt")
 
 # Global lock for thread-safe VLMClient creation (prevents GPU contention in parallel mode)
@@ -53,6 +52,7 @@ class DescribeOutput(BaseModel):
     subject_keywords: list[str]
     action_keywords: list[str]
     clip_description: str
+    audio_description: str | None = None
     clip_name: str
     thumbnail_timestamp_sec: float | None = None
 
@@ -70,6 +70,7 @@ class ClipAnalysis:
     suggested_out_point: float | None = None
     vlm_response: str | None = None
     vlm_summary: str | None = None
+    audio_description: str | None = None
     subject_keywords: list[str] | None = None
     action_keywords: list[str] | None = None
     timestamp: float = 0.0
@@ -148,6 +149,7 @@ def analyze_video_segment(
     api_key: Optional[str] = None,
     provider_preferences: Optional[str] = None,
     is_parallel: bool = False,
+    transcription: Optional[str] = None,
 ) -> dict:
     """Analyze a video segment using VLM for trim suggestions.
 
@@ -160,6 +162,7 @@ def analyze_video_segment(
         api_key: Optional API key.
         provider_preferences: Optional provider preferences.
         is_parallel: Whether called from parallel batch mode.
+        transcription: Optional transcription text to include in prompt.
 
     Returns:
         Dictionary with VLM analysis results including trim suggestions.
@@ -172,28 +175,25 @@ def analyze_video_segment(
         is_parallel=is_parallel
     )
 
-    # Adjust FPS to avoid GPU timeouts on long videos (only for local model)
+    MAX_FRAMES = 500
     if not api_base:
-        duration = get_video_duration(video_path) or 0
         MAX_FRAMES = 128 # Limit total frames to prevent GPU timeout
-        
-        if duration > 0:
+    duration = get_video_duration(video_path) or 0
+    
+    if duration > 0:
+        calculated_frames = duration * fps
+        while calculated_frames > MAX_FRAMES:
+            new_fps = fps / 2 
+            logger.info(f"Video too long ({duration:.1f}s), adjusting FPS from {fps} to {new_fps:.2f} to keep frames under {MAX_FRAMES}")
+            fps = new_fps
             calculated_frames = duration * fps
-            while calculated_frames > MAX_FRAMES:
-                new_fps = fps / 2 
-                logger.info(f"Video too long ({duration:.1f}s), adjusting FPS from {fps} to {new_fps:.2f} to keep frames under {MAX_FRAMES}")
-                fps = new_fps
-                calculated_frames = duration * fps
-    else:
-        # For API, we might want lower FPS to save tokens/bandwidth, or let the client handle it.
-        # The client has a fallback, but let's stick to the passed FPS for now.
-        pass
 
     response = client.generate_from_video(
         prompt=VIDEO_ANALYSIS_PROMPT,
         video_path=video_path,
         fps=fps,
-        max_pixels=max_pixels
+        max_pixels=max_pixels,
+        transcription=transcription
     )
 
     if not response or not response.text:
@@ -270,6 +270,27 @@ def analyze_clip(
             logger.warning(f"Failed to load cached analysis from {json_path}: {e}")
 
     if vlm_result is None:
+        # Run transcription first
+        transcription_text = None
+        try:
+            # Check if transcription already exists
+            stem = video_to_analyze.stem
+            transcription_file = video_to_analyze.parent / f"{stem}_whisper.txt"
+            
+            if not transcription_file.exists():
+                logger.info(f"Running transcription for {video_to_analyze.name}")
+                # Use a smaller/faster model for analysis transcription if needed, 
+                # but for now we use the default large model as configured in transcribe.py
+                # We can pass a model here if we want to override default
+                run_transcribe(model="mlx-community/whisper-large-v3-turbo", input_path=str(video_to_analyze))
+            
+            if transcription_file.exists():
+                with open(transcription_file, "r", encoding="utf-8") as f:
+                    transcription_text = f.read()
+                logger.info(f"Loaded transcription for {video_to_analyze.name} ({len(transcription_text)} chars)")
+        except Exception as e:
+            logger.warning(f"Transcription failed for {video_to_analyze.name}: {e}")
+
         # Analyze video with VLM
         start_time = time.time()
         progress_str = f" [{clip_index}/{total_clips}]" if clip_index and total_clips else ""
@@ -280,7 +301,8 @@ def analyze_clip(
                 api_base=api_base,
                 api_key=api_key,
                 provider_preferences=provider_preferences,
-                is_parallel=is_parallel
+                is_parallel=is_parallel,
+                transcription=transcription_text
             )
             elapsed_time = time.time() - start_time
             logger.info(
@@ -292,6 +314,7 @@ def analyze_clip(
                  f"  Subjects: {', '.join(vlm_result.get('subject_keywords', []))}\n"
                  f"  Actions: {', '.join(vlm_result.get('action_keywords', []))}\n"
                  f"  Description: {vlm_result.get('clip_description')}\n"
+                 f"  Audio: {vlm_result.get('audio_description')}\n"
                  f"  Name: {vlm_result.get('clip_name')}")
             
             # Save result to JSON with metadata
@@ -366,6 +389,7 @@ def analyze_clip(
         suggested_out_point=trim_end,
         vlm_response=vlm_result.get("clip_description"),
         vlm_summary=vlm_result.get("trim_reason"),
+        audio_description=vlm_result.get("audio_description"),
         subject_keywords=vlm_result.get("subject_keywords", []),
         action_keywords=vlm_result.get("action_keywords", []),
         timestamp=modified_ts,
