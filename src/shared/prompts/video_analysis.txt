@@ -2,7 +2,7 @@ Analyze the video and suggest appropriate start and end points
 to remove any unnecessary content (eg. blurry, reframing, etc) at the beginning or end of the clip.
 Provide your suggestions in seconds along with a brief explanation.
 
-Estimate the time of day based on lighting. Choose one: [dawn, morning, noon, afternoon, golden_hour, twilight, night, indoors, unknown].
+Estimate the time of day based on lighting. Choose one: [dawn, morning, noon, afternoon, golden_hour, twilight, night, unknown_indoors, unknown_other].
 
 Read any visible text (OCR) in the video (e.g., street signs, menu items, train station names, ticket stubs).
 

@@ -10,6 +10,10 @@ import signal
 import sys
 import time
 import os
+
+# Fix OpenMP error: OMP: Error #15: Initializing libomp.dylib, but found libomp.dylib already initialized.
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any

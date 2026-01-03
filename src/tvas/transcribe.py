@@ -49,7 +49,6 @@ def segment_is_ok(segment: Dict) -> bool:
     for silence_text in LIKELY_SILENCE_TEXT:
         if silence_text in text.lower() and segment.get('avg_logprob', 0.0) < LIKELY_SILENCE_LOGPROB_THRESHOLD:
             return False
-    print(f"DEBUG: segment = '{segment}'")
     return True
 
 
@@ -67,7 +66,6 @@ def run_transcribe(
         Transcription text on success, None if no speech detected or failure.
     """
 
-    """
     logging.info("Running VAD to check for speech segments: %s", input_path)
     
     try:
@@ -97,7 +95,6 @@ def run_transcribe(
     except Exception as e:
         logging.error("Error running VAD: %s", e)
         return None
-    """
     
     logging.info("Transcribing %s with model %s", input_path, model)
     

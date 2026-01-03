@@ -10,12 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union, List, Any, Tuple, Sequence, cast
 
-import mlx.core as mx
-from mlx_vlm import load, generate
-from mlx_vlm.prompt_utils import apply_chat_template
-from mlx_vlm.utils import load_config
-from mlx_vlm.video_generate import process_vision_info
-
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -81,6 +75,9 @@ class VLMClient:
     def _load_local_model(self):
         """Load the local mlx-vlm model."""
         try:
+            from mlx_vlm import load
+            from mlx_vlm.utils import load_config
+            
             logger.info(f"Loading mlx-vlm model: {self.model_name}")
             self.model, self.processor = load(self.model_name, trust_remote_code=True)
             self.config = load_config(self.model_name, trust_remote_code=True)
@@ -276,6 +273,9 @@ class VLMClient:
         temperature: float
     ) -> Optional[VLMResponse]:
         try:
+            from mlx_vlm import generate
+            from mlx_vlm.prompt_utils import apply_chat_template
+
             if not self.model or not self.processor:
                 logger.error("Model not loaded")
                 return None
@@ -316,6 +316,10 @@ class VLMClient:
         transcription: Optional[str] = None
     ) -> Optional[VLMResponse]:
         try:
+            import mlx.core as mx
+            from mlx_vlm import generate
+            from mlx_vlm.video_generate import process_vision_info
+
             if not self.model or not self.processor:
                 logger.error("Model not loaded")
                 return None
