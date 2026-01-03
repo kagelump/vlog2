@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tvas"
-version = "0.1.0"
+version = "0.1.1"
 description = "Travel Vlog Automation System - Automate vlog ingestion, junk detection, and DaVinci Resolve import"
 readme = "README.md"
 license = {text = "MIT"}
