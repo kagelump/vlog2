@@ -307,6 +307,61 @@ class TVASApp:
         # Run the pipeline
         return self._process_pipeline(source_files, project_name)
 
+    def process_directory(self, directory: Path) -> dict[str, Any]:
+        """Process a directory of video files (analysis only).
+
+        Args:
+            directory: Path to the directory containing video files.
+
+        Returns:
+            Dictionary with processing results.
+        """
+        results: dict[str, Any] = {
+            "directory": str(directory),
+            "success": False,
+            "files_processed": 0,
+            "clips_analyzed": 0,
+            "errors": [],
+        }
+
+        logger.info(f"Scanning directory: {directory}")
+
+        # Gather all video files
+        source_files = []
+        video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF', '.mts', '.MTS', '.insv', '.INSV', '.insp', '.INSP'}
+        
+        for video_file in directory.iterdir():
+            if video_file.is_file() and video_file.suffix in video_extensions:
+                source_files.append(video_file)
+        
+        if not source_files:
+            results["errors"].append(f"No video files found in {directory}")
+            return results
+
+        logger.info(f"Found {len(source_files)} video files")
+        results["files_processed"] = len(source_files)
+
+        # Analyze clips (pass None for proxy_path to analyze source directly)
+        clips_to_analyze = [(f, None) for f in source_files]
+        
+        try:
+            analyses = analyze_clips_batch(
+                clips_to_analyze,
+                use_vlm=self.use_vlm,
+                model_name=self.vlm_model,
+                api_base=self.api_base,
+                api_key=self.api_key,
+                provider_preferences=self.provider_preferences,
+            )
+            results["clips_analyzed"] = len(analyses)
+            results["success"] = True
+            
+        except Exception as e:
+            results["errors"].append(f"Analysis failed: {e}")
+            logger.error(f"Analysis failed: {e}")
+
+        return results
+
     def _on_volume_added(self, volume_path: Path):
         """Handle volume mount event."""
         logger.info(f"Volume added: {volume_path}")
@@ -385,6 +440,7 @@ Examples:
   tvas --watch              Start watching for SD cards
   tvas --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
   tvas --archival-path /Volumes/MySSD --proxy-path ~/Videos
+  tvas --analysis .         Analyze video files in the current directory
         """,
     )
 
@@ -398,6 +454,14 @@ Examples:
         "--volume",
         type=Path,
         help="Process a specific volume/SD card (auto-detects if not specified)",
+    )
+
+    parser.add_argument(
+        "--analysis",
+        type=Path,
+        nargs='?',
+        const=Path('.'),
+        help="Analyze video files in a directory (defaults to current directory)",
     )
 
     parser.add_argument(
@@ -499,6 +563,24 @@ Examples:
         api_key=args.api_key,
         provider_preferences=args.provider,
     )
+
+    if args.analysis:
+        if not args.analysis.exists():
+            logger.error(f"Directory not found: {args.analysis}")
+            sys.exit(1)
+        
+        results = app.process_directory(args.analysis)
+        
+        if results["success"]:
+            logger.info("Analysis complete!")
+            logger.info(f"Files processed: {results['files_processed']}")
+            logger.info(f"Clips analyzed: {results['clips_analyzed']}")
+        else:
+            logger.error("Analysis failed:")
+            for error in results["errors"]:
+                logger.error(f"  - {error}")
+            sys.exit(1)
+        sys.exit(0)
 
     if args.watch:
         app.run_daemon()
