@@ -47,8 +47,12 @@ class DescribeOutput(BaseModel):
     start_sec: float | None
     end_sec: float | None
     trim_reason: str  | None
-    shot_type: str
-    shot_tags: list[str]
+    time_of_day: str | None
+    detected_text: str | list[str] | None
+    landmark_identification: str | None
+    environment: str | None
+    people_presence: str | None
+    mood: str | None
     subject_keywords: list[str]
     action_keywords: list[str]
     clip_description: str
@@ -73,6 +77,12 @@ class ClipAnalysis:
     audio_description: str | None = None
     subject_keywords: list[str] | None = None
     action_keywords: list[str] | None = None
+    time_of_day: str | None = None
+    detected_text: str | list[str] | None = None
+    landmark_identification: str | None = None
+    environment: str | None = None
+    people_presence: str | None = None
+    mood: str | None = None
     timestamp: float = 0.0
     created_timestamp: str | None = None  # File creation timestamp (YYYY-MM-DD HH:MM:SS)
     modified_timestamp: str | None = None  # File modification timestamp (YYYY-MM-DD HH:MM:SS)
@@ -298,7 +308,12 @@ def analyze_clip(
                  f"  Trim: {vlm_result.get('trim')}\n"
                  f"  In/Out: {vlm_result.get('start_sec')}s to {vlm_result.get('end_sec')}s\n"
                  f"  Reason: {vlm_result.get('trim_reason')}\n"
-                 f"  Shot Type/Tags: {vlm_result.get('shot_type')} ({', '.join(vlm_result.get('shot_tags', []))})\n"
+                 f"  Time: {vlm_result.get('time_of_day')}\n"
+                 f"  Mood: {vlm_result.get('mood')}\n"
+                 f"  Environment: {vlm_result.get('environment')}\n"
+                 f"  People: {vlm_result.get('people_presence')}\n"
+                 f"  Landmark: {vlm_result.get('landmark_identification')}\n"
+                 f"  Text: {vlm_result.get('detected_text')}\n"
                  f"  Subjects: {', '.join(vlm_result.get('subject_keywords', []))}\n"
                  f"  Actions: {', '.join(vlm_result.get('action_keywords', []))}\n"
                  f"  Description: {vlm_result.get('clip_description')}\n"
@@ -380,6 +395,12 @@ def analyze_clip(
         audio_description=vlm_result.get("audio_description"),
         subject_keywords=vlm_result.get("subject_keywords", []),
         action_keywords=vlm_result.get("action_keywords", []),
+        time_of_day=vlm_result.get("time_of_day"),
+        detected_text=vlm_result.get("detected_text"),
+        landmark_identification=vlm_result.get("landmark_identification"),
+        environment=vlm_result.get("environment"),
+        people_presence=vlm_result.get("people_presence"),
+        mood=vlm_result.get("mood"),
         timestamp=modified_ts,
         created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
         modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),

@@ -67,6 +67,7 @@ def run_transcribe(
         Transcription text on success, None if no speech detected or failure.
     """
 
+    """
     logging.info("Running VAD to check for speech segments: %s", input_path)
     
     try:
@@ -96,6 +97,7 @@ def run_transcribe(
     except Exception as e:
         logging.error("Error running VAD: %s", e)
         return None
+    """
     
     logging.info("Transcribing %s with model %s", input_path, model)
     

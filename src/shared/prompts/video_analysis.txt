@@ -2,18 +2,17 @@ Analyze the video and suggest appropriate start and end points
 to remove any unnecessary content (eg. blurry, reframing, etc) at the beginning or end of the clip.
 Provide your suggestions in seconds along with a brief explanation.
 
-Determine the primary shot type - based on standard film and editing terminology — choose one of the following:
+Estimate the time of day based on lighting. Choose one: [dawn, morning, noon, afternoon, golden_hour, twilight, night, indoors, unknown].
 
-pov: The camera represents the perspective of a character or subject.
-insert: A close-up or detailed shot of an object, text, or small action that provides specific information.
-establishing: A wide or introductory shot that sets the scene or location context.
-Add descriptive tags that apply to the shot. Choose all that fit from the following list:
+Read any visible text (OCR) in the video (e.g., street signs, menu items, train station names, ticket stubs).
 
-static: The camera does not move.
-dynamic: The camera moves (pans, tilts, tracks, zooms, etc.).
-closeup: Tight framing around a person's face or an object.
-medium: Frames the subject roughly from the waist up.
-wide: Shows the subject and significant background context.
+Identify specific landmarks or generic setting types (e.g., Airport Terminal, Mountain Trail, Coffee Shop Interior).
+
+Describe the environment setting (e.g., "busy train station," "quiet forest path," "cafe interior").
+
+Identify who is in the shot (e.g., Solo, Couple, Crowd, Locals, Nobody).
+
+Determine the emotional "vibe" or mood of the clip (e.g., Chaotic, Serene, Energetic, Melancholic, Romantic).
 
 Describe this video clip using 1-2 sentences. Then give it a short name to use as a filename. Use snake_case.
 
@@ -24,8 +23,12 @@ Respond in JSON format with the following fields:
 - start_sec: Suggested start time in seconds (float) or null if no trim needed.
 - end_sec: Suggested end time in seconds (float) or null if no trim needed.
 - trim_reason: A brief explanation of your trim suggestions.
-- shot_type: The primary shot type (pov, insert, establishing).
-- shot_tags: A list of descriptive tags (static, dynamic, closeup, medium, wide).
+- time_of_day: Estimated time based on lighting.
+- detected_text: Any visible text found in the video.
+- landmark_identification: Specific landmarks or generic setting types.
+- environment: Description of the setting.
+- people_presence: Who is in the shot.
+- mood: The emotional vibe of the clip.
 - subject_keywords: A list of keywords describing subjects, scenes, environment, etc.
 - action_keywords: A list of keywords describing what is happening in the video.
 - clip_description: A short summary of the clip's content.

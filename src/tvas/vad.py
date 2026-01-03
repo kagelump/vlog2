@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
-
+from silero_vad import load_silero_vad, get_speech_timestamps
+import json
 import logging
 import torch
 import soundfile as sf
@@ -135,7 +135,7 @@ def main():
     detector = SpeechDetector()
     speech_timestamps = detector.detect_speech(input_path)
     
-    print(speech_timestamps)
+    print(json.dumps(speech_timestamps))
 
 
 if __name__ == "__main__":
