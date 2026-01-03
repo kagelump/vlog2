@@ -15,7 +15,9 @@ dependencies = [
     "opencv-python>=4.8.0",
     "mlx-vlm>=0.3.0",
     "toga>=0.4.0",
-    "torchvision", 
+    "torchvision",
+    "opencc",
+    "mlx-whisper",
 ]
 
 [project.optional-dependencies]
