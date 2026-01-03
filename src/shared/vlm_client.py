@@ -6,6 +6,7 @@ import urllib.error
 import subprocess
 import time
 import tempfile
+import platform
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union, List, Any, Tuple, Sequence, cast
@@ -68,6 +69,7 @@ class VLMClient:
         self.model = None
         self.processor = None
         self.config = None
+        self._cached_video_codec: Optional[list[str]] = None
 
         if not self.api_base:
             self._load_local_model()
@@ -127,26 +129,62 @@ class VLMClient:
         else:
             return self._generate_local_video(prompt, video_path, fps, max_tokens, temperature, max_pixels, transcription)
 
+    def _detect_best_video_codec(self) -> list[str]:
+        """Detect the best available video codec with hardware acceleration."""
+        if self._cached_video_codec:
+            return self._cached_video_codec
+
+        system = platform.system()
+        candidates = []
+
+        if system == "Darwin":
+            candidates.append(["h264_videotoolbox", "-b:v", "2000k", "-allow_sw", "1"])
+        elif system == "Linux" or system == "Windows":
+            candidates.append(["h264_nvenc", "-preset", "p1", "-b:v", "2000k"])
+            candidates.append(["h264_qsv", "-global_quality", "25", "-load_plugin", "hevc_hw"])
+            candidates.append(["h264_vaapi"])
+        
+        # Software fallbacks
+        candidates.append(["libx264", "-preset", "ultrafast", "-crf", "28"])
+        candidates.append(["libopenh264", "-b:v", "2000k"])
+
+        # Test codecs
+        for codec_args in candidates:
+            codec_name = codec_args[0]
+            try:
+                # Minimal test to check if encoder exists and works
+                cmd = [
+                    "ffmpeg", "-v", "error", 
+                    "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.1", 
+                    "-c:v", codec_name, 
+                    "-f", "null", "-"
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    logger.info(f"Detected usable video codec: {codec_name}")
+                    self._cached_video_codec = ["-c:v"] + codec_args
+                    return self._cached_video_codec
+            except Exception:
+                continue
+
+        # Ultimate fallback
+        logger.warning("No optimized video codec found, falling back to default.")
+        self._cached_video_codec = []
+        return self._cached_video_codec
+
     def _process_video_ffmpeg(self, video_path: Path, fps: float) -> Optional[str]:
         """Process video using ffmpeg and return base64 string."""
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
             temp_output = Path(temp_file.name)
             
         try:
-            # Construct ffmpeg command
-            # -y: overwrite output
-            # -i: input
-            # -vf: video filters (fps, scale)
-            # -c:v: video codec (libx264)
-            # -an: remove audio
-            # -preset: ultrafast (speed)
-            # -crf: 28 (compression)
+            codec_flags = self._detect_best_video_codec()
             
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(video_path),
-                "-vf", f"fps={fps},scale='min(1280,iw)':-2",
-                "-c:v", "libopenh264",
+                "-vf", f"fps={fps},scale='min(1280,iw)':-2"
+            ] + codec_flags + [
                 "-an",
                 str(temp_output)
             ]
