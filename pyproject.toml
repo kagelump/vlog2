@@ -18,6 +18,8 @@ dependencies = [
     "torchvision",
     "opencc",
     "mlx-whisper",
+    "silero-vad",
+    "onnxruntime",
 ]
 
 [project.optional-dependencies]
