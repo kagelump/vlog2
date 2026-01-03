@@ -54,6 +54,7 @@ class DescribeOutput(BaseModel):
     action_keywords: list[str]
     clip_description: str
     clip_name: str
+    thumbnail_timestamp_sec: float | None = None
 
 @dataclass
 class ClipAnalysis:
@@ -74,6 +75,7 @@ class ClipAnalysis:
     timestamp: float = 0.0
     created_timestamp: str | None = None  # File creation timestamp (YYYY-MM-DD HH:MM:SS)
     modified_timestamp: str | None = None  # File modification timestamp (YYYY-MM-DD HH:MM:SS)
+    thumbnail_timestamp_sec: float | None = None
 def validate_model_output(parsed: Any) -> dict:
     """Validate parsed JSON from the model against DescribeOutput.
 
@@ -369,6 +371,7 @@ def analyze_clip(
         timestamp=modified_ts,
         created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
         modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
+        thumbnail_timestamp_sec=vlm_result.get("thumbnail_timestamp_sec"),
     )
 
 

@@ -17,6 +17,8 @@ wide: Shows the subject and significant background context.
 
 Describe this video clip using 1-2 sentences. Then give it a short name to use as a filename. Use snake_case.
 
+Identify the single best frame to serve as a thumbnail for this video clip. This frame should be visually clear, representative of the clip's content, and aesthetically pleasing. Provide the timestamp of this frame in seconds.
+
 Respond in JSON format with the following fields:
 - trim: Boolean describing whether or not trim is needed.
 - start_sec: Suggested start time in seconds (float) or null if no trim needed.
@@ -28,3 +30,4 @@ Respond in JSON format with the following fields:
 - action_keywords: A list of keywords describing what is happening in the video.
 - clip_description: A short summary of the clip's content.
 - clip_name: A concise name (2-5 words) for the clip based on its content in lower_snake_case.
+- thumbnail_timestamp_sec: The timestamp in seconds (float) of the best thumbnail frame.
