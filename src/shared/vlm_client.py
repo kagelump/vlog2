@@ -146,9 +146,7 @@ class VLMClient:
                 "ffmpeg", "-y",
                 "-i", str(video_path),
                 "-vf", f"fps={fps},scale='min(1280,iw)':-2",
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-crf", "28",
+                "-c:v", "libopenh264",
                 "-an",
                 str(temp_output)
             ]
