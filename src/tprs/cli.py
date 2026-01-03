@@ -13,7 +13,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from shared import DEFAULT_VLM_MODEL
+from shared import DEFAULT_VLM_MODEL, get_openrouter_api_key
 from tprs.tprs import (
     find_jpeg_photos,
     process_photos_batch,
@@ -153,15 +153,7 @@ Examples:
                 args.openrouter_provider = "Alibaba"
         
         if args.api_key == "lm-studio":
-            key_path = Path.home() / ".openrouterkey"
-            if key_path.exists():
-                try:
-                    args.api_key = key_path.read_text().strip()
-                    logger.info(f"Loaded OpenRouter API key from {key_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to read {key_path}: {e}")
-            else:
-                logger.warning(f"OpenRouter mode enabled but {key_path} not found and no --api-key provided.")
+            args.api_key = get_openrouter_api_key(None)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)

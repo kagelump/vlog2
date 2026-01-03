@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from shared import DEFAULT_VLM_MODEL
+from shared import DEFAULT_VLM_MODEL, get_openrouter_api_key
 from tvas.analysis import analyze_clips_batch
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
 from shared.proxy import generate_proxies_batch
@@ -548,8 +548,9 @@ Examples:
     api_base = args.api_base
     if args.openrouter:
         api_base = "https://openrouter.ai/api/v1"
-        if not args.api_key and "OPENROUTER_API_KEY" in os.environ:
-            args.api_key = os.environ["OPENROUTER_API_KEY"]
+        args.api_key = get_openrouter_api_key(args.api_key)
+        if not args.model or args.model == DEFAULT_VLM_MODEL:
+            args.model = "qwen/qwen3-vl-235b-a22b-instruct"
     elif args.lmstudio:
         api_base = "http://localhost:1234/v1"
 

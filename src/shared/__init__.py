@@ -3,6 +3,8 @@
 Common code used by both Travel Vlog Automation System and Travel Photo Rating System.
 """
 
+import logging
+import os
 from pathlib import Path
 
 __version__ = "0.1.0"
@@ -11,6 +13,8 @@ __version__ = "0.1.0"
 DEFAULT_VLM_MODEL = "mlx-community/Qwen3-VL-8B-Instruct-8bit"
 
 _PROMPT_OVERRIDES = {}
+
+logger = logging.getLogger(__name__)
 
 def set_prompt_override(filename: str, content: str):
     """Set an override for a prompt file."""
@@ -30,3 +34,24 @@ def load_prompt(filename: str) -> str:
     if not prompt_path.exists():
         raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
     return prompt_path.read_text().strip()
+
+
+def get_openrouter_api_key(api_key: str | None = None) -> str | None:
+    """Get OpenRouter API key from argument, environment, or file."""
+    if api_key:
+        return api_key
+    
+    if "OPENROUTER_API_KEY" in os.environ:
+        return os.environ["OPENROUTER_API_KEY"]
+    
+    key_path = Path.home() / ".openrouterkey"
+    if key_path.exists():
+        try:
+            key = key_path.read_text().strip()
+            logger.info(f"Loaded OpenRouter API key from {key_path}")
+            return key
+        except Exception as e:
+            logger.warning(f"Failed to read {key_path}: {e}")
+    
+    logger.warning("OpenRouter mode enabled but no API key found in env or ~/.openrouterkey")
+    return None
