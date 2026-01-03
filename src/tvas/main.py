@@ -42,6 +42,7 @@ class TVASApp:
         api_base: str | None = None,
         api_key: str | None = None,
         provider_preferences: str | None = None,
+        max_workers: int = 1,
     ):
         """Initialize the TVAS application.
 
@@ -54,6 +55,7 @@ class TVASApp:
             api_base: Base URL for VLM API (e.g. OpenRouter or LM Studio).
             api_key: API key for VLM API.
             provider_preferences: Comma-separated list of preferred providers (for OpenRouter).
+            max_workers: Number of parallel workers for analysis.
         """
         # Auto-detect ACASIS volume for archival
         if archival_path is None:
@@ -74,6 +76,7 @@ class TVASApp:
         self.api_base = api_base
         self.api_key = api_key
         self.provider_preferences = provider_preferences
+        self.max_workers = max_workers
         self.watcher: VolumeWatcher | None = None
         self._running = False
 
@@ -142,6 +145,7 @@ class TVASApp:
                 api_base=self.api_base,
                 api_key=self.api_key,
                 provider_preferences=self.provider_preferences,
+                max_workers=self.max_workers,
             )
             results["clips_analyzed"] = len(analyses)
 
@@ -352,6 +356,7 @@ class TVASApp:
                 api_base=self.api_base,
                 api_key=self.api_key,
                 provider_preferences=self.provider_preferences,
+                max_workers=self.max_workers,
             )
             results["clips_analyzed"] = len(analyses)
             results["success"] = True
@@ -527,6 +532,14 @@ Examples:
     )
 
     parser.add_argument(
+        "-p",
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of parallel workers for analysis (default: 1)",
+    )
+
+    parser.add_argument(
         "--auto-approve",
         action="store_true",
         help="Auto-approve all AI decisions (skip UI)",
@@ -563,6 +576,7 @@ Examples:
         api_base=api_base,
         api_key=args.api_key,
         provider_preferences=args.provider,
+        max_workers=args.workers,
     )
 
     if args.analysis:

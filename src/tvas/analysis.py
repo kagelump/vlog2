@@ -6,13 +6,14 @@ This module handles AI-powered trim detection using VLMClient (local or API).
 from collections.abc import Sequence
 import json
 import logging
-import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 import time
 from typing import Any, Tuple, cast, Optional
 from pydantic import BaseModel, ValidationError
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 from shared.proxy import get_video_duration
 from shared import load_prompt, DEFAULT_VLM_MODEL
@@ -28,6 +29,10 @@ VIDEO_FPS = 10.0  # Sample at 10fps for analysis
 VIDEO_SEGMENT_DURATION = 5.0  # Analyze first/last 5 seconds
 
 VIDEO_ANALYSIS_PROMPT = load_prompt("video_analysis.txt")
+
+# Global lock for thread-safe VLMClient creation (prevents GPU contention in parallel mode)
+_vlm_client_lock = Lock()
+_cached_vlm_clients: dict[str, VLMClient] = {}
 
 class ConfidenceLevel(Enum):
     """Confidence level of trim detection."""
@@ -76,6 +81,60 @@ def validate_model_output(parsed: Any) -> dict:
     obj = DescribeOutput.model_validate(parsed)
     return obj.model_dump()
 
+
+def _get_or_create_vlm_client(
+    model_name: str,
+    api_base: Optional[str],
+    api_key: Optional[str],
+    provider_preferences: Optional[str],
+    is_parallel: bool = False,
+) -> VLMClient:
+    """Get or create a VLMClient with thread-safe caching.
+    
+    For local models in parallel mode, uses a shared client to avoid
+    multiple GPU model loads. For API mode, creates per-thread clients.
+    
+    Args:
+        model_name: Model name.
+        api_base: Optional API base URL.
+        api_key: Optional API key.
+        provider_preferences: Optional provider preferences.
+        is_parallel: Whether this is called from parallel mode.
+    
+    Returns:
+        VLMClient instance.
+    """
+    # API-based models don't have GPU contention, use per-call instances
+    if api_base:
+        return VLMClient(
+            model_name=model_name,
+            api_base=api_base,
+            api_key=api_key,
+            provider_preferences=provider_preferences
+        )
+    
+    # For local models in parallel mode, use a shared cached client
+    if is_parallel:
+        cache_key = f"{model_name}:{provider_preferences}"
+        with _vlm_client_lock:
+            if cache_key not in _cached_vlm_clients:
+                logger.info(f"Creating shared VLMClient for {model_name} (parallel mode)")
+                _cached_vlm_clients[cache_key] = VLMClient(
+                    model_name=model_name,
+                    api_base=api_base,
+                    api_key=api_key,
+                    provider_preferences=provider_preferences
+                )
+            return _cached_vlm_clients[cache_key]
+    
+    # Sequential mode - create a new client
+    return VLMClient(
+        model_name=model_name,
+        api_base=api_base,
+        api_key=api_key,
+        provider_preferences=provider_preferences
+    )
+
 def analyze_video_segment(
     video_path: Path,
     model_name: str = DEFAULT_VLM_MODEL,
@@ -84,6 +143,7 @@ def analyze_video_segment(
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
     provider_preferences: Optional[str] = None,
+    is_parallel: bool = False,
 ) -> dict:
     """Analyze a video segment using VLM for trim suggestions.
 
@@ -95,15 +155,17 @@ def analyze_video_segment(
         api_base: Optional API base URL.
         api_key: Optional API key.
         provider_preferences: Optional provider preferences.
+        is_parallel: Whether called from parallel batch mode.
 
     Returns:
         Dictionary with VLM analysis results including trim suggestions.
     """
-    client = VLMClient(
+    client = _get_or_create_vlm_client(
         model_name=model_name,
         api_base=api_base,
         api_key=api_key,
-        provider_preferences=provider_preferences
+        provider_preferences=provider_preferences,
+        is_parallel=is_parallel
     )
 
     # Adjust FPS to avoid GPU timeouts on long videos (only for local model)
@@ -163,6 +225,9 @@ def analyze_clip(
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
     provider_preferences: Optional[str] = None,
+    is_parallel: bool = False,
+    clip_index: Optional[int] = None,
+    total_clips: Optional[int] = None,
 ) -> ClipAnalysis:
     """Perform complete analysis of a video clip using VLM for trim detection.
 
@@ -174,6 +239,9 @@ def analyze_clip(
         api_base: Optional API base URL.
         api_key: Optional API key.
         provider_preferences: Optional provider preferences.
+        is_parallel: Whether this is called from parallel batch mode.
+        clip_index: Current clip index for progress tracking (1-indexed).
+        total_clips: Total clips in batch for progress tracking.
 
     Returns:
         ClipAnalysis with complete analysis results.
@@ -200,17 +268,19 @@ def analyze_clip(
     if vlm_result is None:
         # Analyze video with VLM
         start_time = time.time()
+        progress_str = f" [{clip_index}/{total_clips}]" if clip_index and total_clips else ""
         try:
             vlm_result = analyze_video_segment(
                 video_to_analyze,
                 model_name,
                 api_base=api_base,
                 api_key=api_key,
-                provider_preferences=provider_preferences
+                provider_preferences=provider_preferences,
+                is_parallel=is_parallel
             )
             elapsed_time = time.time() - start_time
             logger.info(
-                f"VLM result for {video_to_analyze.name} ({duration}s) took {elapsed_time:.2f} seconds:\n"
+                f"VLM result{progress_str} for {video_to_analyze.name} ({duration}s) took {elapsed_time:.2f} seconds:\n"
                  f"  Trim: {vlm_result.get('trim')}\n"
                  f"  In/Out: {vlm_result.get('start_sec')}s to {vlm_result.get('end_sec')}s\n"
                  f"  Reason: {vlm_result.get('trim_reason')}\n"
@@ -227,9 +297,8 @@ def analyze_clip(
             except Exception as e:
                 logger.warning(f"Failed to save analysis to {json_path}: {e}")
         except Exception as e:
-            logger.error(f"Analysis failed for {video_to_analyze.name}: {e}")
-            # Return a dummy result or re-raise?
-            # For now, let's return a failed analysis
+            logger.error(f"Analysis failed{progress_str} for {video_to_analyze.name}: {e}")
+            # Return a failed analysis with proper context preserved
             return ClipAnalysis(
                 source_path=source_path,
                 proxy_path=proxy_path,
@@ -284,6 +353,7 @@ def analyze_clips_batch(
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
     provider_preferences: Optional[str] = None,
+    max_workers: int = 1,
 ) -> list[ClipAnalysis]:
     """Analyze a batch of video clips.
 
@@ -294,24 +364,87 @@ def analyze_clips_batch(
         api_base: Optional API base URL.
         api_key: Optional API key.
         provider_preferences: Optional provider preferences.
+        max_workers: Number of parallel workers (default 1 for sequential).
+                     For local models: 1-2 recommended (GPU contention).
+                     For API-based models: 4-8 recommended for throughput.
+                     Automatically clamped to max 16 workers.
 
     Returns:
         List of ClipAnalysis results.
     """
-    results = []
-
-    for i, (source_path, proxy_path) in enumerate(clips):
-        logger.info(f"Processing clip {i + 1}/{len(clips)}: {source_path.name}")
-        result = analyze_clip(
-            source_path,
-            proxy_path,
-            use_vlm,
-            model_name,
-            api_base=api_base,
-            api_key=api_key,
-            provider_preferences=provider_preferences
+    # Validate and clamp max_workers
+    original_workers = max_workers
+    max_workers = max(1, min(max_workers, 16))
+    if original_workers != max_workers:
+        logger.info(f"Adjusted workers from {original_workers} to {max_workers}")
+    
+    if max_workers > 1 and api_base is None:
+        logger.warning(
+            f"Parallel analysis with {max_workers} workers on local model may cause GPU memory issues. "
+            f"Consider using API mode (--openrouter or --lmstudio) for parallel processing."
         )
-        results.append(result)
+    if max_workers <= 1:
+        results = []
+        for i, (source_path, proxy_path) in enumerate(clips):
+            logger.info(f"Processing clip {i + 1}/{len(clips)}: {source_path.name}")
+            result = analyze_clip(
+                source_path,
+                proxy_path,
+                use_vlm,
+                model_name,
+                api_base=api_base,
+                api_key=api_key,
+                provider_preferences=provider_preferences,
+                is_parallel=False,
+            )
+            results.append(result)
+    else:
+        logger.info(f"Starting parallel analysis with {max_workers} workers on {len(clips)} clips")
+        results_map = {}
+        completed_count = 0
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_clip = {
+                executor.submit(
+                    analyze_clip,
+                    source_path,
+                    proxy_path,
+                    use_vlm,
+                    model_name,
+                    api_base=api_base,
+                    api_key=api_key,
+                    provider_preferences=provider_preferences,
+                    is_parallel=True,
+                    clip_index=i + 1,
+                    total_clips=len(clips),
+                ): (i, source_path, proxy_path)
+                for i, (source_path, proxy_path) in enumerate(clips)
+            }
+            
+            for future in as_completed(future_to_clip):
+                index, source_path, proxy_path = future_to_clip[future]
+                completed_count += 1
+                try:
+                    result = future.result()
+                    results_map[index] = result
+                    logger.debug(f"Finished clip {index + 1}/{len(clips)}: {source_path.name}")
+                except Exception as e:
+                    logger.error(f"Clip {index + 1}/{len(clips)} ({source_path.name}) failed: {e}")
+                    # Create a failed result preserving original context
+                    results_map[index] = ClipAnalysis(
+                        source_path=source_path,
+                        proxy_path=proxy_path,
+                        duration_seconds=0,
+                        confidence=ConfidenceLevel.LOW,
+                        vlm_summary=f"Analysis failed: {e}",
+                        timestamp=source_path.stat().st_mtime,
+                    )
+                
+                if completed_count % max(1, len(clips) // 10) == 0 or completed_count == len(clips):
+                    logger.info(f"Progress: {completed_count}/{len(clips)} clips analyzed")
+        
+        # Sort results back into original order
+        results = [results_map[i] for i in range(len(clips))]
 
     # Summary logging
     with_trim = sum(1 for r in results if r.suggested_in_point or r.suggested_out_point)
