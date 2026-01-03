@@ -21,7 +21,7 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 # Default logging configuration for CLI runs
 logging.basicConfig(
@@ -56,18 +56,15 @@ def segment_is_ok(segment: Dict) -> bool:
 def run_transcribe(
     model: str,
     input_path: str,
-) -> int:
+) -> Optional[str]:
     """Transcribe a single preview file using mlx_whisper Python API.
-
-    The output text file will be written to the same directory as the input file
-    and will use the input file stem with suffix `_whisper.txt`.
 
     Args:
         model: Model ID for mlx_whisper
         input_path: Path to input video/audio file
 
     Returns:
-        0 on success, non-zero on failure.
+        Transcription text on success, None if no speech detected or failure.
     """
 
     logging.info("Running VAD to check for speech segments: %s", input_path)
@@ -86,35 +83,48 @@ def run_transcribe(
         
         if not speech_timestamps:
             logging.info("No speech segments detected. Skipping transcription.")
-            return 0
+            return None
         
         logging.info("Found %d speech segments", len(speech_timestamps))
         
     except subprocess.CalledProcessError as e:
         logging.error("VAD failed: %s", e.stderr)
-        return 2
+        return None
     except json.JSONDecodeError as e:
         logging.error("Failed to parse VAD output: %s", e)
-        return 2
+        return None
     except Exception as e:
         logging.error("Error running VAD: %s", e)
-        return 2
-            
-    for segment in result.get('segments', []):
-        if 'text' in segment:
-            segment['text'] = cc.convert(segment['text'])
-        
-        if 'words' in segment:
-            for word in segment['words']:
-                if 'word' in word:
-                    word['word'] = cc.convert(word['word'])
-
-    # Determine output path (same directory as input, stem + _whisper.txt)
-    p = Path(input_path)
-    stem = p.stem
-    output_file = p.parent / f"{stem}_whisper.txt"
+        return None
     
-    with open(output_file, "w", encoding="utf-8") as f:
+    logging.info("Transcribing %s with model %s", input_path, model)
+    
+    try:
+        # Transcribe directly
+        result = transcribe(
+            audio=input_path,
+            path_or_hf_repo=model,
+            verbose=None,
+            word_timestamps=True,  # Enable for richer metadata
+            temperature=(0.0, 0.2, 0.4, 0.5)
+        )
+        
+        # Post-process for Chinese conversion
+        if result.get('language') == 'zh':
+            cc = OpenCC('s2tw')
+            if 'text' in result:
+                result['text'] = cc.convert(result['text'])
+            
+            for segment in result.get('segments', []):
+                if 'text' in segment:
+                    segment['text'] = cc.convert(segment['text'])
+                
+                if 'words' in segment:
+                    for word in segment['words']:
+                        if 'word' in word:
+                            word['word'] = cc.convert(word['word'])
+
+        formatted_lines = []
         for segment in result.get('segments', []):
             if not segment_is_ok(segment):
                 continue
@@ -131,13 +141,16 @@ def run_transcribe(
             else:
                 timestamp = f"{m:02d}:{s:02d}"
             
-            f.write(f"[{timestamp}] {text}\n")
-            print(f"[{timestamp}] {text}")
-    
-    logging.info("Transcription completed: %s", output_file)
-    logging.info(f"  Total segments: {len(result.get('segments', []))}")
-    logging.info(f"  Detected language: {result.get('language', 'unknown')}")
-    return 0
+            formatted_lines.append(f"[{timestamp}] {text}")
+        
+        logging.info(f"  Total segments: {len(result.get('segments', []))}")
+        logging.info(f"  Detected language: {result.get('language', 'unknown')}")
+        
+        return "\n".join(formatted_lines)
+        
+    except Exception as e:
+        logging.exception("Error during transcription: %s", e)
+        return None
 
 
 if __name__ == "__main__":
@@ -148,4 +161,19 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Input video path")
 
     args = parser.parse_args()
-    sys.exit(run_transcribe(args.model, args.input))
+    transcription = run_transcribe(args.model, args.input)
+    
+    if transcription:
+        # Determine output path (same directory as input, stem + _whisper.txt)
+        p = Path(args.input)
+        stem = p.stem
+        output_file = p.parent / f"{stem}_whisper.txt"
+        
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(transcription + "\n")
+        
+        logging.info("Transcription completed: %s", output_file)
+        print(transcription)
+        sys.exit(0)
+    else:
+        sys.exit(1)

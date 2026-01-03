@@ -273,21 +273,9 @@ def analyze_clip(
         # Run transcription first
         transcription_text = None
         try:
-            # Check if transcription already exists
-            stem = video_to_analyze.stem
-            transcription_file = video_to_analyze.parent / f"{stem}_whisper.txt"
-            
-            if not transcription_file.exists():
-                logger.info(f"Running transcription for {video_to_analyze.name}")
-                # Use a smaller/faster model for analysis transcription if needed, 
-                # but for now we use the default large model as configured in transcribe.py
-                # We can pass a model here if we want to override default
-                run_transcribe(model="mlx-community/whisper-large-v3-turbo", input_path=str(video_to_analyze))
-            
-            if transcription_file.exists():
-                with open(transcription_file, "r", encoding="utf-8") as f:
-                    transcription_text = f.read()
-                logger.info(f"Loaded transcription for {video_to_analyze.name} ({len(transcription_text)} chars)")
+            transcription_text = run_transcribe(model="mlx-community/whisper-large-v3-turbo", input_path=str(video_to_analyze))
+            if transcription_text:
+                logger.info(f"Generated transcription for {video_to_analyze.name} ({len(transcription_text)} chars)")
         except Exception as e:
             logger.warning(f"Transcription failed for {video_to_analyze.name}: {e}")
 
