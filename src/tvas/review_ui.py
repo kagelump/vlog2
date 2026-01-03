@@ -36,6 +36,7 @@ class ClipReviewItem:
     ai_decision: str  # "keep", "reject", "review"
     confidence: str  # "high", "medium", "low"
     junk_reasons: list[str]
+    needs_trim: bool = False
     user_decision: UserDecision = UserDecision.UNDECIDED
     suggested_in_point: float | None = None
     suggested_out_point: float | None = None
@@ -294,6 +295,7 @@ def create_review_items_from_analysis(
             ai_decision=ai_decision,
             confidence=analysis.confidence.value,
             junk_reasons=[],  # No longer tracking junk reasons
+            needs_trim=analysis.needs_trim,
             suggested_in_point=analysis.suggested_in_point,
             suggested_out_point=analysis.suggested_out_point,
         )

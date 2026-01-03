@@ -166,12 +166,16 @@ def create_timeline_from_analysis(
         # Use AI-generated clip name if available, otherwise use filename
         clip_name = analysis.clip_name or analysis.source_path.stem
 
+        # Only use suggested trim points if AI says trim is needed
+        in_point = analysis.suggested_in_point if analysis.needs_trim else 0.0
+        out_point = analysis.suggested_out_point if analysis.needs_trim else None
+
         timeline_clip = TimelineClip(
             source_path=analysis.source_path,
             name=clip_name,
             duration_seconds=analysis.duration_seconds,
-            in_point_seconds=analysis.suggested_in_point or 0.0,
-            out_point_seconds=analysis.suggested_out_point,
+            in_point_seconds=in_point or 0.0,
+            out_point_seconds=out_point,
             confidence=analysis.confidence.value,
             camera_source=analysis.source_path.parent.name,
             ai_notes=ai_notes,
@@ -211,6 +215,7 @@ def export_analysis_json(
             "proxy_path": str(analysis.proxy_path) if analysis.proxy_path else None,
             "duration_seconds": analysis.duration_seconds,
             "confidence": analysis.confidence.value,
+            "needs_trim": analysis.needs_trim,
             "clip_name": analysis.clip_name,
             "suggested_in_point": analysis.suggested_in_point,
             "suggested_out_point": analysis.suggested_out_point,

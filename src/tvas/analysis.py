@@ -38,6 +38,7 @@ class ConfidenceLevel(Enum):
 
 class DescribeOutput(BaseModel):
     """Structured output from the video description model."""
+    trim: bool
     start_sec: float | None
     end_sec: float | None
     trim_reason: str  | None
@@ -56,6 +57,7 @@ class ClipAnalysis:
     proxy_path: Path | None
     duration_seconds: float
     confidence: ConfidenceLevel
+    needs_trim: bool = False
     clip_name: str | None = None
     suggested_in_point: float | None = None
     suggested_out_point: float | None = None
@@ -209,6 +211,7 @@ def analyze_clip(
             elapsed_time = time.time() - start_time
             logger.info(
                 f"VLM result for {video_to_analyze.name} ({duration}s) took {elapsed_time:.2f} seconds:\n"
+                 f"  Trim: {vlm_result.get('trim')}\n"
                  f"  In/Out: {vlm_result.get('start_sec')}s to {vlm_result.get('end_sec')}s\n"
                  f"  Reason: {vlm_result.get('trim_reason')}\n"
                  f"  Shot Type/Tags: {vlm_result.get('shot_type')} ({', '.join(vlm_result.get('shot_tags', []))})\n"
@@ -238,22 +241,31 @@ def analyze_clip(
 
     # Extract clip name from VLM suggestions
     clip_name = vlm_result.get("clip_name")
+    needs_trim = vlm_result.get("trim", False)
     
     # Determine trim points from VLM suggestions
     trim_start = vlm_result.get("start_sec") # Note: DescribeOutput uses start_sec/end_sec
     trim_end = vlm_result.get("end_sec")
 
     # Determine confidence based on whether VLM provided suggestions
-    if trim_start is not None or trim_end is not None:
-        confidence = ConfidenceLevel.HIGH
+    if needs_trim:
+        if trim_start is not None or trim_end is not None:
+            confidence = ConfidenceLevel.HIGH
+        else:
+            confidence = ConfidenceLevel.MEDIUM
     else:
-        confidence = ConfidenceLevel.MEDIUM
+        # If no trim needed, we're confident if start/end are null
+        if trim_start is None and trim_end is None:
+            confidence = ConfidenceLevel.HIGH
+        else:
+            confidence = ConfidenceLevel.MEDIUM
 
     return ClipAnalysis(
         source_path=source_path,
         proxy_path=proxy_path,
         duration_seconds=duration,
         confidence=confidence,
+        needs_trim=needs_trim,
         clip_name=clip_name,
         suggested_in_point=trim_start,
         suggested_out_point=trim_end,
