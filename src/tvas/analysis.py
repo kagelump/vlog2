@@ -232,47 +232,6 @@ def analyze_video_segment(
         raise Exception(f'Output did not match expected schema: {e}\nRaw: {parsed}')
 
 
-def run_vad_subprocess(
-    input_path: str,
-) -> bool:
-    """Run VAD subprocess to check for speech segments.
-    
-    Args:
-        input_path: Path to input video/audio file.
-        
-    Returns:
-        True if speech is detected, False otherwise.
-    """
-    try:
-        vad_script = Path(__file__).parent / "vad.py"
-        logger.info(f"Running VAD subprocess: {vad_script} for {input_path}")
-        
-        result = subprocess.run(
-            [sys.executable, str(vad_script), input_path],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        
-        if result.returncode != 0:
-            logger.warning(f"VAD process failed with code {result.returncode}: {result.stderr}")
-            # If VAD fails, safer to assume speech exists to try transcription or just skip?
-            # Existing behavior in transcribe.py was to assume failure means no transcription.
-            # But here let's assume if VAD fails, we skip transcription to avoid errors.
-            return False
-            
-        try:
-            timestamps = json.loads(result.stdout.strip())
-            return len(timestamps) > 0
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse VAD output: {result.stdout}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Failed to run VAD subprocess: {e}")
-        return False
-
-
 def run_transcribe_subprocess(
     model: str,
     input_path: str,
@@ -291,7 +250,7 @@ def run_transcribe_subprocess(
         logger.info(f"Running transcription subprocess: {transcribe_script} for {input_path}")
         
         result = subprocess.run(
-            [sys.executable, str(transcribe_script), "--model", model, "--input", input_path, "--output", "-", "--skip-vad"],
+            [sys.executable, str(transcribe_script), "--model", model, "--input", input_path, "--output", "-"],
             capture_output=True,
             text=True,
             check=False,  # Don't raise on non-zero exit, check returncode manually
@@ -362,24 +321,14 @@ def analyze_clip(
             logger.warning(f"Failed to load cached analysis from {json_path}: {e}")
 
     if vlm_result is None:
-        # Run VAD first to check for speech
+        # Run transcription first
         transcription_text = None
-        has_speech = False
-        
         try:
-            has_speech = run_vad_subprocess(str(video_to_analyze))
-            if has_speech:
-                logger.info(f"Speech detected in {video_to_analyze.name}, proceeding to transcription")
-                transcription_text = run_transcribe_subprocess(
-                    model="mlx-community/whisper-large-v3-turbo", 
-                    input_path=str(video_to_analyze)
-                )
-                if transcription_text:
-                    logger.info(f"Generated transcription for {video_to_analyze.name} ({len(transcription_text)} chars)")
-            else:
-                logger.info(f"No speech detected in {video_to_analyze.name}, skipping transcription")
+            transcription_text = run_transcribe_subprocess(model="mlx-community/whisper-large-v3-turbo", input_path=str(video_to_analyze))
+            if transcription_text:
+                logger.info(f"Generated transcription for {video_to_analyze.name} ({len(transcription_text)} chars)")
         except Exception as e:
-            logger.warning(f"VAD/Transcription failed for {video_to_analyze.name}: {e}")
+            logger.warning(f"Transcription failed for {video_to_analyze.name}: {e}")
 
         # Analyze video with VLM
         start_time = time.time()
