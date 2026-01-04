@@ -180,8 +180,6 @@ if __name__ == "__main__":
                 f.write(transcription + "\n")
             
             logging.info("Transcription completed: %s", output_file)
-            # Still print to stdout to maintain backward compatibility with current behavior
-            print(transcription)
         sys.exit(0)
     else:
         sys.exit(1)

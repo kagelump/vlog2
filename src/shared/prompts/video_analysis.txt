@@ -24,7 +24,7 @@ Respond in JSON format with the following fields:
 - end_sec: Suggested end time in seconds (float) or null if no trim needed.
 - trim_reason: A brief explanation of your trim suggestions.
 - time_of_day: Estimated time based on lighting.
-- detected_text: Any visible text found in the video.
+- detected_text: Any visible text found in the video.  Choose up to 10 most important.
 - landmark_identification: Specific landmarks or generic setting types.
 - environment: Description of the setting.
 - people_presence: Who is in the shot.

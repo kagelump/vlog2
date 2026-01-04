@@ -50,7 +50,7 @@ class DescribeOutput(BaseModel):
     trim_reason: str  | None
     time_of_day: str | None
     detected_text: str | list[str] | None
-    landmark_identification: str | None
+    landmark_identification: str | list[str] | None
     environment: str | None
     people_presence: str | None
     mood: str | None
@@ -80,7 +80,7 @@ class ClipAnalysis:
     action_keywords: list[str] | None = None
     time_of_day: str | None = None
     detected_text: str | list[str] | None = None
-    landmark_identification: str | None = None
+    landmark_identification: str | list[str] | None = None
     environment: str | None = None
     people_presence: str | None = None
     mood: str | None = None
