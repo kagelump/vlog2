@@ -10,6 +10,7 @@ import logging
 import os
 import tempfile
 import threading
+import contextlib
 import concurrent.futures
 import base64
 import urllib.request
@@ -121,51 +122,37 @@ def are_photos_in_same_burst(
     Returns:
         Tuple of (is_same_burst, keyword).
     """
-    p1_resized = None
-    p2_resized = None
     try:
-        # Resize for speed
-        p1_resized = resize_image(photo1, max_dimension=512)
-        p2_resized = resize_image(photo2, max_dimension=512)
-        
-        image_paths = [
-            p1_resized if p1_resized else photo1,
-            p2_resized if p2_resized else photo2
-        ]
-        
-        prompt = load_prompt("burst_similarity.txt")
+        # Resize for speed using context manager
+        with resize_image(photo1, max_dimension=512) as p1_resized, \
+             resize_image(photo2, max_dimension=512) as p2_resized:
+            
+            image_paths = [
+                p1_resized if p1_resized else photo1,
+                p2_resized if p2_resized else photo2
+            ]
+            
+            prompt = load_prompt("burst_similarity.txt")
 
-        response = client.generate(
-            prompt=prompt,
-            image_paths=image_paths,
-            max_tokens=50
-        )
-        
-        if not response:
-            return False, None
-        text = response.text
-        
-        # Clean JSON
-        clean_text = clean_json_response(text)
+            response = client.generate(
+                prompt=prompt,
+                image_paths=image_paths,
+                max_tokens=50
+            )
+            
+            if not response:
+                return False, None
+            text = response.text
+            
+            # Clean JSON
+            clean_text = clean_json_response(text)
 
-        data = json.loads(clean_text)
-        return bool(data.get("same_burst", False)), data.get("keyword")
+            data = json.loads(clean_text)
+            return bool(data.get("same_burst", False)), data.get("keyword")
         
     except Exception as e:
         logger.warning(f"Burst comparison failed for {photo1.name} and {photo2.name}: {e}")
         return False, None
-    finally:
-        # Cleanup temp files
-        if p1_resized and p1_resized.exists():
-            try:
-                os.unlink(p1_resized)
-            except Exception:
-                pass
-        if p2_resized and p2_resized.exists():
-            try:
-                os.unlink(p2_resized)
-            except Exception:
-                pass
 
 
 def generate_bursts(
@@ -232,13 +219,31 @@ def generate_bursts(
         yield current_burst, current_keyword
 
 
-def resize_image(image_path: Path, max_dimension: int = 1024) -> Optional[Path]:
-    """Resize image if it exceeds max_dimension. Returns temp path or None if no resize needed."""
+@contextlib.contextmanager
+def temporary_image_file(suffix: str = ".jpg") -> Iterator[Path]:
+    """Context manager for creating and cleaning up a temporary image file."""
+    tf = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tf.close()
+    path = Path(tf.name)
+    try:
+        yield path
+    finally:
+        if path.exists():
+            try:
+                os.unlink(path)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temp file {path}: {e}")
+
+
+@contextlib.contextmanager
+def resize_image(image_path: Path, max_dimension: int = 1024) -> Iterator[Optional[Path]]:
+    """Resize image if it exceeds max_dimension. Yields temp path or None if no resize needed."""
     try:
         with Image.open(image_path) as img:
             width, height = img.size
             if width <= max_dimension and height <= max_dimension:
-                return None
+                yield None
+                return
             
             # Calculate new size
             ratio = min(max_dimension / width, max_dimension / height)
@@ -246,17 +251,17 @@ def resize_image(image_path: Path, max_dimension: int = 1024) -> Optional[Path]:
                 
             img = img.resize(new_size, Image.Resampling.LANCZOS)
             
-            # Save to temp file
-            tf = tempfile.NamedTemporaryFile(suffix=image_path.suffix, delete=False)
-            img.save(tf.name)
-            tf.close()
-            return Path(tf.name)
+            with temporary_image_file(suffix=image_path.suffix) as temp_path:
+                img.save(temp_path)
+                yield temp_path
+
     except Exception as e:
         logger.warning(f"Failed to resize image {image_path}: {e}")
-        return None
+        yield None
 
 
-def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
+@contextlib.contextmanager
+def crop_image(image_path: Path, bbox: list[int]) -> Iterator[Optional[Path]]:
     """Crop image to bounding box. bbox is [xmin, ymin, xmax, ymax] on 0-1000 scale."""
     try:
         with Image.open(image_path) as img:
@@ -271,18 +276,17 @@ def crop_image(image_path: Path, bbox: list[int]) -> Optional[Path]:
             
             # Ensure valid crop
             if left >= right or top >= bottom:
-                return None
+                yield None
+                return
                 
             cropped = img.crop((left, top, right, bottom))
             
-            # Save to temp file
-            tf = tempfile.NamedTemporaryFile(suffix=image_path.suffix, delete=False)
-            cropped.save(tf.name)
-            tf.close()
-            return Path(tf.name)
+            with temporary_image_file(suffix=image_path.suffix) as temp_path:
+                cropped.save(temp_path)
+                yield temp_path
     except Exception as e:
         logger.warning(f"Failed to crop image {image_path}: {e}")
-        return None
+        yield None
 
 
 def expand_bbox(bbox: list[int]) -> list[int]:
@@ -381,134 +385,116 @@ def analyze_photo(
     Returns:
         PhotoAnalysis with rating, keywords, and description, or None if analysis fails.
     """
-    # Resize image if needed
-    temp_path = resize_image(photo_path)
-    image_path = temp_path if temp_path else photo_path
-    blur_level_int = 0
-    provider = "mlx-vlm"
-
     try:
-        # Single prompt for JSON output
-        json_prompt = load_prompt("photo_analysis.txt")
+        # Resize image if needed
+        with resize_image(photo_path) as temp_path:
+            image_path = temp_path if temp_path else photo_path
+            blur_level_int = 0
+            provider = "mlx-vlm"
 
-        response = client.generate(
-            prompt=json_prompt,
-            image_paths=[image_path],
-            max_tokens=1000
-        )
-        
-        if not response:
-            return None
-        response_text = response.text
-        provider = response.provider or "api"
+            # Single prompt for JSON output
+            json_prompt = load_prompt("photo_analysis.txt")
 
-        analysis = parse_analysis_response(response_text, photo_path, provider=provider)
-        if not analysis:
-            return None
+            response = client.generate(
+                prompt=json_prompt,
+                image_paths=[image_path],
+                max_tokens=1000
+            )
             
-        # Use analysis object directly
-        primary_subject = analysis.primary_subject
-        primary_subject_bounding_box = analysis.primary_subject_bounding_box
-        rating = analysis.rating
-        rating_reason = analysis.rating_reason
-        keywords = analysis.keywords
-        description = analysis.description
-        raw_response = analysis.raw_response
+            if not response:
+                return None
+            response_text = response.text
+            provider = response.provider or "api"
 
-        try:
-            # Secondary analysis: Check subject sharpness
-            if not analysis.subject_sharpness_check_required:
-                logger.info(f"Skipping subject sharpness check for {photo_path.name}: {analysis.subject_sharpness_check_reason}")
-            elif primary_subject and primary_subject_bounding_box and isinstance(primary_subject_bounding_box, list) and len(primary_subject_bounding_box) == 4:
-                logger.debug(f"Performing secondary subject analysis for {primary_subject}")
-                crop_path = crop_image(photo_path, primary_subject_bounding_box)
+            analysis = parse_analysis_response(response_text, photo_path, provider=provider)
+            if not analysis:
+                return None
                 
-                if crop_path:
-                    # Resize crop if needed to avoid memory issues
-                    resized_crop = resize_image(crop_path)
-                    final_crop_path = resized_crop if resized_crop else crop_path
+            # Use analysis object directly
+            primary_subject = analysis.primary_subject
+            primary_subject_bounding_box = analysis.primary_subject_bounding_box
+            rating = analysis.rating
+            rating_reason = analysis.rating_reason
+            keywords = analysis.keywords
+            description = analysis.description
+            raw_response = analysis.raw_response
+
+            try:
+                # Secondary analysis: Check subject sharpness
+                if not analysis.subject_sharpness_check_required:
+                    logger.info(f"Skipping subject sharpness check for {photo_path.name}: {analysis.subject_sharpness_check_reason}")
+                elif primary_subject and primary_subject_bounding_box and isinstance(primary_subject_bounding_box, list) and len(primary_subject_bounding_box) == 4:
+                    logger.debug(f"Performing secondary subject analysis for {primary_subject}")
                     
-                    try:
-                        subject_prompt_template = load_prompt("subject_sharpness.txt")
-                        subject_prompt = subject_prompt_template.format(primary_subject=primary_subject)
-                        
-                        response = client.generate(
-                            prompt=subject_prompt,
-                            image_paths=[final_crop_path],
-                            max_tokens=100
-                        )
-                        subject_text = response.text if response else None
-                            
-                        if subject_text:
-                            # Clean JSON
-                            clean_subject = clean_json_response(subject_text)
-                            
-                            try:
-                                subject_data = json.loads(clean_subject)
-                                blur_level = subject_data.get("blur_level", "SHARP")
-                                blur_type = subject_data.get("blur_type", "N/A")
+                    with crop_image(photo_path, primary_subject_bounding_box) as crop_path:
+                        if crop_path:
+                            # Resize crop if needed to avoid memory issues
+                            with resize_image(crop_path) as resized_crop:
+                                final_crop_path = resized_crop if resized_crop else crop_path
                                 
-                                if blur_level == "VERY_BLURRY":
-                                    rating_reason += f" BUT Subject '{primary_subject}' detected as VERY_BLURRY ({blur_type}). Downgrading rating to 1."
-                                    logger.info(rating_reason)
-                                    rating = 1
-                                    blur_level_int = 2
-                                elif blur_level == "MINOR_BLURRY":
-                                    rating_reason += f" BUT Subject '{primary_subject}' detected as MINOR_BLURRY ({blur_type}). Reducing rating by 1."
-                                    logger.info(rating_reason)
-                                    rating = max(1, rating - 1)
-                                    blur_level_int = 1
+                                try:
+                                    subject_prompt_template = load_prompt("subject_sharpness.txt")
+                                    subject_prompt = subject_prompt_template.format(primary_subject=primary_subject)
                                     
-                            except json.JSONDecodeError:
-                                logger.warning(f"Failed to parse subject analysis response: {subject_text}")
-                            
-                    except Exception as e:
-                        logger.warning(f"Secondary analysis failed: {e}")
-                    finally:
-                        # Cleanup
-                        if resized_crop and resized_crop.exists():
-                            try:
-                                os.unlink(resized_crop)
-                            except Exception:
-                                pass
-                        if crop_path.exists():
-                            try:
-                                os.unlink(crop_path)
-                            except Exception:
-                                pass
+                                    response = client.generate(
+                                        prompt=subject_prompt,
+                                        image_paths=[final_crop_path],
+                                        max_tokens=100
+                                    )
+                                    subject_text = response.text if response else None
+                                        
+                                    if subject_text:
+                                        # Clean JSON
+                                        clean_subject = clean_json_response(subject_text)
+                                        
+                                        try:
+                                            subject_data = json.loads(clean_subject)
+                                            blur_level = subject_data.get("blur_level", "SHARP")
+                                            blur_type = subject_data.get("blur_type", "N/A")
+                                            
+                                            if blur_level == "VERY_BLURRY":
+                                                rating_reason += f" BUT Subject '{primary_subject}' detected as VERY_BLURRY ({blur_type}). Downgrading rating to 1."
+                                                logger.info(rating_reason)
+                                                rating = 1
+                                                blur_level_int = 2
+                                            elif blur_level == "MINOR_BLURRY":
+                                                rating_reason += f" BUT Subject '{primary_subject}' detected as MINOR_BLURRY ({blur_type}). Reducing rating by 1."
+                                                logger.info(rating_reason)
+                                                rating = max(1, rating - 1)
+                                                blur_level_int = 1
+                                                
+                                        except json.JSONDecodeError:
+                                            logger.warning(f"Failed to parse subject analysis response: {subject_text}")
+                                        
+                                except Exception as e:
+                                    logger.warning(f"Secondary analysis failed: {e}")
                 
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed: {e}. Response: {response_text}")
-            # Fallback
-            rating = 1
-            rating_reason = "N/A"
-            keywords = ["failed"]
-            description = "Failed analysis."
-            primary_subject = None
-            primary_subject_bounding_box = None
-            
-        return PhotoAnalysis(
-            photo_path=photo_path,
-            rating=rating,
-            rating_reason=rating_reason,
-            keywords=keywords,
-            description=description,
-            primary_subject=primary_subject,
-            primary_subject_bounding_box=primary_subject_bounding_box,
-            raw_response=response_text,
-            blur_level=blur_level_int,
-            provider=analysis.provider,
-        )
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parsing failed: {e}. Response: {response_text}")
+                # Fallback
+                rating = 1
+                rating_reason = "N/A"
+                keywords = ["failed"]
+                description = "Failed analysis."
+                primary_subject = None
+                primary_subject_bounding_box = None
+                
+            return PhotoAnalysis(
+                photo_path=photo_path,
+                rating=rating,
+                rating_reason=rating_reason,
+                keywords=keywords,
+                description=description,
+                primary_subject=primary_subject,
+                primary_subject_bounding_box=primary_subject_bounding_box,
+                raw_response=response_text,
+                blur_level=blur_level_int,
+                provider=analysis.provider,
+            )
 
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
         return None
-    finally:
-        if temp_path and temp_path.exists():
-            try:
-                os.unlink(temp_path)
-            except Exception as e:
-                logger.warning(f"Failed to delete temp file {temp_path}: {e}")
 
 
 def generate_xmp_sidecar(analysis: PhotoAnalysis, output_path: Optional[Path] = None) -> Path:
@@ -703,75 +689,191 @@ def load_analysis_from_xmp(xmp_path: Path, photo_path: Path) -> PhotoAnalysis:
 
 
 def select_best_in_burst(
+
+
     burst_analyses: list[PhotoAnalysis],
+
+
     client: VLMClient
+
+
 ) -> PhotoAnalysis:
+
+
     """Select the best photo from a burst using VLM comparison."""
+
+
     # Filter for candidates (rating >= 3)
+
+
     candidates = [a for a in burst_analyses if a.rating >= 3]
+
+
     
+
+
     if not candidates:
+
+
         # If all are bad, just return the one with highest rating
+
+
         return max(burst_analyses, key=lambda x: x.rating)
+
+
         
+
+
     if len(candidates) == 1:
+
+
         return candidates[0]
+
+
         
+
+
     # If too many candidates, take top 4 by rating
+
+
     candidates.sort(key=lambda x: x.rating, reverse=True)
+
+
     candidates = candidates[:4]
+
+
     
+
+
     # Prepare prompt for comparison
+
+
     image_paths = []
-    temp_files = []
+
+
     
+
+
     try:
-        for c in candidates:
-            # Resize for comparison to save memory and tokens
-            resized = resize_image(c.photo_path, max_dimension=512)
-            if resized:
-                image_paths.append(resized)
-                temp_files.append(resized)
-            else:
-                image_paths.append(c.photo_path)
-        
-        prompt = load_prompt("best_in_burst.txt")
 
-        response = client.generate(
-            prompt=prompt,
-            image_paths=image_paths,
-            max_tokens=100
-        )
-        if not response or not response.text:
-            return candidates[0]
 
-        response_text = response.text
+        with contextlib.ExitStack() as stack:
+
+
+            for c in candidates:
+
+
+                # Resize for comparison to save memory and tokens
+
+
+                resized = stack.enter_context(resize_image(c.photo_path, max_dimension=512))
+
+
+                if resized:
+
+
+                    image_paths.append(resized)
+
+
+                else:
+
+
+                    image_paths.append(c.photo_path)
+
+
             
-        # Clean JSON
-        clean_text = clean_json_response(response_text)
-        
-        try:
-            data = json.loads(clean_text)
-            best_index = int(data.get("best_index", 0))
-            if 0 <= best_index < len(candidates):
-                best = candidates[best_index]
-                best.rating_reason += f"\nBest reason: {data.get("reason", "N/A")}"
-                best.best_in_burst = True
-                return best
-        except Exception as e:
-            logger.warning(f"Failed to parse burst selection response: {e}")
+
+
+            prompt = load_prompt("best_in_burst.txt")
+
+
+
+
+
+            response = client.generate(
+
+
+                prompt=prompt,
+
+
+                image_paths=image_paths,
+
+
+                max_tokens=100
+
+
+            )
+
+
+            if not response or not response.text:
+
+
+                return candidates[0]
+
+
+
+
+
+            response_text = response.text
+
+
+                
+
+
+            # Clean JSON
+
+
+            clean_text = clean_json_response(response_text)
+
+
             
+
+
+            try:
+
+
+                data = json.loads(clean_text)
+
+
+                best_index = int(data.get("best_index", 0))
+
+
+                if 0 <= best_index < len(candidates):
+
+
+                    best = candidates[best_index]
+
+
+                    best.rating_reason += f"\nBest reason: {data.get('reason', 'N/A')}"
+
+
+                    best.best_in_burst = True
+
+
+                    return best
+
+
+            except Exception as e:
+
+
+                logger.warning(f"Failed to parse burst selection response: {e}")
+
+
+            
+
+
     except Exception as e:
+
+
         logger.error(f"Burst selection failed: {e}")
-    finally:
-        for tf in temp_files:
-            if tf.exists():
-                try:
-                    os.unlink(tf)
-                except Exception:
-                    pass
+
+
                     
+
+
     # Fallback to first candidate (highest rated)
+
+
     return candidates[0]
 
 
