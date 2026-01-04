@@ -449,6 +449,48 @@ def analyze_clip(
     )
 
 
+def aggregate_analysis_json(project_dir: Path) -> Path:
+    """Combine all individual JSON analysis files into a single sorted analysis.json.
+    
+    Args:
+        project_dir: Directory containing individual .json analysis files (e.g. proxy dir).
+        
+    Returns:
+        Path to the combined analysis.json.
+    """
+    logger.info(f"Aggregating analysis results in {project_dir}")
+    all_results = []
+    
+    # Find all .json files that have a 'metadata' key (to distinguish from analysis.json itself)
+    for json_file in project_dir.glob("*.json"):
+        if json_file.name == "analysis.json":
+            continue
+            
+        try:
+            with open(json_file, "r") as f:
+                data = json.load(f)
+                if "metadata" in data and "created_timestamp" in data["metadata"]:
+                    # Ensure source_path is included if not present (relative to project_dir)
+                    if "source_path" not in data:
+                        data["source_path"] = str(json_file.with_suffix(".mp4"))
+                    all_results.append(data)
+        except Exception as e:
+            logger.warning(f"Failed to read {json_file}: {e}")
+            
+    # Sort by created_timestamp
+    all_results.sort(key=lambda x: x.get("metadata", {}).get("created_timestamp", ""))
+    
+    output_path = project_dir / "analysis.json"
+    try:
+        with open(output_path, "w") as f:
+            json.dump(all_results, f, indent=2)
+        logger.info(f"Successfully aggregated {len(all_results)} results into {output_path}")
+    except Exception as e:
+        logger.error(f"Failed to write aggregated analysis.json: {e}")
+        
+    return output_path
+
+
 def analyze_clips_batch(
     clips: list[tuple[Path, Path | None]],
     use_vlm: bool = True,
@@ -553,6 +595,13 @@ def analyze_clips_batch(
         
         # Sort results back into original order
         results = [results_map[i] for i in range(len(clips))]
+
+    # Aggregate results into analysis.json if we have proxies
+    if clips:
+        # Determine project directory from the first proxy path or source path
+        first_source, first_proxy = clips[0]
+        project_dir = (first_proxy or first_source).parent
+        aggregate_analysis_json(project_dir)
 
     # Summary logging
     with_trim = sum(1 for r in results if r.suggested_in_point or r.suggested_out_point)
