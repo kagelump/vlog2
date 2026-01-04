@@ -9,13 +9,12 @@ This document outlines the plan to refactor `src/tvas/tprs.py` to improve code r
     - The class will handle `model`, `processor`, `config`, `api_base`, `api_key`, and `provider_preferences`.
     - It will expose a unified `generate(prompt, image_paths, ...)` method.
 
-## 2. Centralize JSON Cleaning
+## 2. Centralize JSON Cleaning (DONE)
 - **Goal**: Remove code duplication for stripping markdown code blocks from JSON responses.
 - **Action**: Extract JSON cleaning logic into a helper function `clean_json_response(text: str) -> str`.
 - **Details**: Replace repeated logic in `are_photos_in_same_burst`, `parse_analysis_response`, `analyze_photo`, and `select_best_in_burst`.
-- **Status**: Completed.
 
-## 3. Use Context Managers for Temporary Files
+## 3. Use Context Managers for Temporary Files (DONE)
 - **Goal**: Simplify resource management and ensure temporary files are always cleaned up.
 - **Action**: Create a context manager `temporary_image_file` or similar.
 - **Details**: Refactor `resize_image` and `crop_image` to use this context manager or return a context manager.
