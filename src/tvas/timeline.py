@@ -185,59 +185,6 @@ def create_timeline_from_analysis(
     return create_timeline(timeline_clips, output_path, config)
 
 
-def export_analysis_json(
-    analyses: list,
-    output_path: Path,
-) -> Path:
-    """Export analysis results to JSON for debugging/logging.
-
-    Args:
-        analyses: List of ClipAnalysis objects.
-        output_path: Path for the JSON file.
-
-    Returns:
-        Path to the created JSON file.
-    """
-    from tvas.analysis import ClipAnalysis
-
-    data = {
-        "export_time": datetime.now().isoformat(),
-        "total_clips": len(analyses),
-        "clips": [],
-    }
-
-    for analysis in analyses:
-        if not isinstance(analysis, ClipAnalysis):
-            continue
-
-        clip_data = {
-            "source_path": str(analysis.source_path),
-            "proxy_path": str(analysis.proxy_path) if analysis.proxy_path else None,
-            "duration_seconds": analysis.duration_seconds,
-            "confidence": analysis.confidence.value,
-            "needs_trim": analysis.needs_trim,
-            "clip_name": analysis.clip_name,
-            "suggested_in_point": analysis.suggested_in_point,
-            "suggested_out_point": analysis.suggested_out_point,
-            "vlm_response": analysis.vlm_response,
-            "vlm_summary": analysis.vlm_summary,
-            "timestamp": analysis.timestamp,
-            "metadata": {
-                "created_timestamp": analysis.created_timestamp,
-                "modified_timestamp": analysis.modified_timestamp,
-            },
-        }
-        data["clips"].append(clip_data)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, "w") as f:
-        json.dump(data, f, indent=2)
-
-    logger.info(f"Analysis exported to {output_path}")
-    return output_path
-
-
 def get_timeline_summary(timeline_path: Path) -> dict | None:
     """Get a summary of an existing timeline.
 

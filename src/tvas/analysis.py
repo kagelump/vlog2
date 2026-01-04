@@ -449,6 +449,88 @@ def analyze_clip(
     )
 
 
+import csv
+
+def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
+    """Export aggregated analysis results to CSV.
+    
+    Args:
+        project_dir: Directory to save the CSV.
+        all_results: List of dictionaries containing analysis data.
+        
+    Returns:
+        Path to the created CSV file.
+    """
+    csv_path = project_dir / "analysis.csv"
+    
+    headers = [
+        "Source File",
+        "Proxy Path",
+        "Clip Name",
+        "Duration",
+        "Confidence",
+        "Trim",
+        "In Point",
+        "Out Point",
+        "VLM Response",
+        "Summary",
+        "Audio Description",
+        "Subject Keywords",
+        "Action Keywords",
+        "Time of Day",
+        "Detected Text",
+        "Landmark Identification",
+        "Environment",
+        "People Presence",
+        "Mood",
+        "Timestamp",
+        "Created",
+        "Modified",
+        "Thumbnail Time"
+    ]
+    
+    try:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            
+            for data in all_results:
+                source_path = Path(data.get("source_path", ""))
+                metadata = data.get("metadata", {})
+                
+                writer.writerow([
+                    source_path.name,
+                    data.get("proxy_path") or "",
+                    data.get("clip_name") or "",
+                    f"{data.get('duration_seconds', 0):.2f}",
+                    data.get("confidence", ""),
+                    "Yes" if data.get("trim") else "No",
+                    f"{data.get('start_sec', 0):.2f}" if data.get("start_sec") is not None else "",
+                    f"{data.get('end_sec', 0):.2f}" if data.get("end_sec") is not None else "",
+                    data.get("clip_description") or "",
+                    data.get("trim_reason") or "",
+                    data.get("audio_description") or "",
+                    ", ".join(data.get("subject_keywords", [])) if data.get("subject_keywords") else "",
+                    ", ".join(data.get("action_keywords", [])) if data.get("action_keywords") else "",
+                    data.get("time_of_day") or "",
+                    str(data.get("detected_text", "")) if data.get("detected_text") else "",
+                    str(data.get("landmark_identification", "")) if data.get("landmark_identification") else "",
+                    data.get("environment") or "",
+                    data.get("people_presence") or "",
+                    data.get("mood") or "",
+                    f"{data.get('timestamp', 0):.2f}",
+                    metadata.get("created_timestamp") or "",
+                    metadata.get("modified_timestamp") or "",
+                    f"{data.get('thumbnail_timestamp_sec', 0):.2f}" if data.get("thumbnail_timestamp_sec") is not None else ""
+                ])
+        
+        logger.info(f"Aggregated analysis CSV exported to {csv_path}")
+    except Exception as e:
+        logger.error(f"Failed to export aggregated analysis CSV: {e}")
+        
+    return csv_path
+
+
 def aggregate_analysis_json(project_dir: Path) -> Path:
     """Combine all individual JSON analysis files into a single sorted analysis.json.
     
@@ -485,6 +567,10 @@ def aggregate_analysis_json(project_dir: Path) -> Path:
         with open(output_path, "w") as f:
             json.dump(all_results, f, indent=2)
         logger.info(f"Successfully aggregated {len(all_results)} results into {output_path}")
+        
+        # Also export CSV
+        aggregate_analysis_csv(project_dir, all_results)
+        
     except Exception as e:
         logger.error(f"Failed to write aggregated analysis.json: {e}")
         
