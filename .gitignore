@@ -90,3 +90,4 @@ venv.bak/
 
 # Logs
 *.log
+src/tvas/_version.py

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "tvas"
-version = "0.1.1"
+dynamic = ["version"]
 description = "Travel Vlog Automation System - Automate vlog ingestion, junk detection, and DaVinci Resolve import"
 readme = "README.md"
 license = {text = "MIT"}
@@ -41,6 +41,9 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "shared" = ["prompts/*.txt"]
+
+[tool.setuptools_scm]
+write_to = "src/tvas/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
