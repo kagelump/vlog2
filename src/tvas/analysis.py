@@ -12,6 +12,8 @@ from enum import Enum
 from pathlib import Path
 import time
 from typing import Any, Tuple, cast, Optional
+import subprocess
+import sys
 from pydantic import BaseModel, ValidationError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -19,7 +21,6 @@ from threading import Lock
 from shared.proxy import get_video_duration
 from shared import load_prompt, DEFAULT_VLM_MODEL
 from shared.vlm_client import VLMClient
-from tvas.transcribe import run_transcribe
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -231,6 +232,46 @@ def analyze_video_segment(
         raise Exception(f'Output did not match expected schema: {e}\nRaw: {parsed}')
 
 
+def run_transcribe_subprocess(
+    model: str,
+    input_path: str,
+) -> Optional[str]:
+    """Transcribe a single preview file using tvas.transcribe via subprocess.
+
+    Args:
+        model: Model ID for mlx_whisper
+        input_path: Path to input video/audio file
+
+    Returns:
+        Transcription text on success, None if no speech detected or failure.
+    """
+    try:
+        transcribe_script = Path(__file__).parent / "transcribe.py"
+        logger.info(f"Running transcription subprocess: {transcribe_script} for {input_path}")
+        
+        result = subprocess.run(
+            [sys.executable, str(transcribe_script), "--model", model, "--input", input_path],
+            capture_output=True,
+            text=True,
+            check=False,  # Don't raise on non-zero exit, check returncode manually
+        )
+        
+        if result.returncode != 0:
+            if result.returncode == 1 and not result.stderr:
+                 # Usually means no speech detected or handled error
+                 logger.info(f"Transcription process exited with code 1 (likely no speech): {input_path}")
+                 return None
+            
+            logger.warning(f"Transcription failed with code {result.returncode}: {result.stderr}")
+            return None
+            
+        return result.stdout.strip()
+        
+    except Exception as e:
+        logger.error(f"Failed to run transcription subprocess: {e}")
+        return None
+
+
 def analyze_clip(
     source_path: Path,
     proxy_path: Path | None = None,
@@ -283,7 +324,7 @@ def analyze_clip(
         # Run transcription first
         transcription_text = None
         try:
-            transcription_text = run_transcribe(model="mlx-community/whisper-large-v3-turbo", input_path=str(video_to_analyze))
+            transcription_text = run_transcribe_subprocess(model="mlx-community/whisper-large-v3-turbo", input_path=str(video_to_analyze))
             if transcription_text:
                 logger.info(f"Generated transcription for {video_to_analyze.name} ({len(transcription_text)} chars)")
         except Exception as e:
