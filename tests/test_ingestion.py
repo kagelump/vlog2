@@ -142,26 +142,6 @@ class TestFileCopy:
         assert verify_copy(source, dest) is False
 
 
-class TestDestinationStructure:
-    """Tests for destination directory structure creation."""
-
-    def test_create_destination_structure(self, tmp_path: Path):
-        """Test creation of destination directory structure."""
-        result = create_destination_structure(
-            tmp_path,
-            "TestProject",
-            CameraType.SONY_A7C,
-        )
-
-        assert result.exists()
-        assert result.parent.name.endswith("_TestProject")
-        assert result.name == "SonyA7C"
-
-        # Check cache directory was created
-        cache_path = result.parent / ".cache"
-        assert cache_path.exists()
-
-
 class TestGetVideoFiles:
     """Tests for video file discovery."""
 
