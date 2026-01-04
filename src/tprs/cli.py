@@ -131,11 +131,6 @@ Examples:
 
     args = parser.parse_args()
 
-    # Default to LM Studio if not on macOS and no other API is specified
-    if sys.platform != "darwin" and not args.lmstudio and not args.openrouter and not args.api_base:
-        logger.info("Non-macOS platform detected. Defaulting to --lmstudio mode.")
-        args.lmstudio = True
-
     # Auto-detect LM Studio
     if not args.lmstudio and not args.api_base and not args.openrouter:
         if check_lmstudio_running():
