@@ -2825,7 +2825,6 @@ wheels = [
 
 [[package]]
 name = "tvas"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "mlx-vlm" },
