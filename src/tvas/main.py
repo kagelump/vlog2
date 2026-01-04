@@ -561,6 +561,11 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Default to LM Studio if not on macOS and no other API is specified
+    if sys.platform != "darwin" and not args.lmstudio and not args.openrouter and not args.api_base:
+        logger.info("Non-macOS platform detected. Defaulting to --lmstudio mode.")
+        args.lmstudio = True
+
     # Handle API configuration shortcuts
     api_base = args.api_base
     if args.openrouter:
