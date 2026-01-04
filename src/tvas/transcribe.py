@@ -55,46 +55,51 @@ def segment_is_ok(segment: Dict) -> bool:
 def run_transcribe(
     model: str,
     input_path: str,
+    skip_vad: bool = False,
 ) -> Optional[str]:
     """Transcribe a single preview file using mlx_whisper Python API.
 
     Args:
         model: Model ID for mlx_whisper
         input_path: Path to input video/audio file
+        skip_vad: If True, skip Voice Activity Detection check.
 
     Returns:
         Transcription text on success, None if no speech detected or failure.
     """
 
-    logging.info("Running VAD to check for speech segments: %s", input_path)
-    
-    try:
-        # Run VAD as subprocess to check for speech segments
-        vad_script = Path(__file__).parent / "vad.py"
-        result = subprocess.run(
-            [sys.executable, str(vad_script), input_path],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+    if not skip_vad:
+        logging.info("Running VAD to check for speech segments: %s", input_path)
         
-        speech_timestamps = json.loads(result.stdout.strip())
-        
-        if not speech_timestamps:
-            logging.info("No speech segments detected. Skipping transcription.")
+        try:
+            # Run VAD as subprocess to check for speech segments
+            vad_script = Path(__file__).parent / "vad.py"
+            result = subprocess.run(
+                [sys.executable, str(vad_script), input_path],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            
+            speech_timestamps = json.loads(result.stdout.strip())
+            
+            if not speech_timestamps:
+                logging.info("No speech segments detected. Skipping transcription.")
+                return None
+            
+            logging.info("Found %d speech segments", len(speech_timestamps))
+            
+        except subprocess.CalledProcessError as e:
+            logging.error("VAD failed: %s", e.stderr)
             return None
-        
-        logging.info("Found %d speech segments", len(speech_timestamps))
-        
-    except subprocess.CalledProcessError as e:
-        logging.error("VAD failed: %s", e.stderr)
-        return None
-    except json.JSONDecodeError as e:
-        logging.error("Failed to parse VAD output: %s", e)
-        return None
-    except Exception as e:
-        logging.error("Error running VAD: %s", e)
-        return None
+        except json.JSONDecodeError as e:
+            logging.error("Failed to parse VAD output: %s", e)
+            return None
+        except Exception as e:
+            logging.error("Error running VAD: %s", e)
+            return None
+    else:
+        logging.info("Skipping VAD check as requested.")
     
     logging.info("Transcribing %s with model %s", input_path, model)
     
@@ -159,9 +164,10 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="mlx-community/whisper-large-v3-turbo", help="Model id for mlx_whisper")
     parser.add_argument("--input", required=True, help="Input video path")
     parser.add_argument("--output", help="Output path (use '-' for stdout only)")
+    parser.add_argument("--skip-vad", action="store_true", help="Skip VAD check")
 
     args = parser.parse_args()
-    transcription = run_transcribe(args.model, args.input)
+    transcription = run_transcribe(args.model, args.input, skip_vad=args.skip_vad)
     
     if transcription:
         if args.output == "-":
