@@ -25,7 +25,7 @@ from typing import Dict, Optional
 
 # Default logging configuration for CLI runs
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
@@ -158,21 +158,30 @@ if __name__ == "__main__":
     )
     parser.add_argument("--model", default="mlx-community/whisper-large-v3-turbo", help="Model id for mlx_whisper")
     parser.add_argument("--input", required=True, help="Input video path")
+    parser.add_argument("--output", help="Output path (use '-' for stdout only)")
 
     args = parser.parse_args()
     transcription = run_transcribe(args.model, args.input)
     
     if transcription:
-        # Determine output path (same directory as input, stem + _whisper.txt)
-        p = Path(args.input)
-        stem = p.stem
-        output_file = p.parent / f"{stem}_whisper.txt"
-        
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(transcription + "\n")
-        
-        logging.info("Transcription completed: %s", output_file)
-        print(transcription)
+        if args.output == "-":
+            # Just print to stdout
+            print(transcription)
+        else:
+            # Determine output path
+            p = Path(args.input)
+            if args.output:
+                output_file = Path(args.output)
+            else:
+                stem = p.stem
+                output_file = p.parent / f"{stem}_whisper.txt"
+            
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(transcription + "\n")
+            
+            logging.info("Transcription completed: %s", output_file)
+            # Still print to stdout to maintain backward compatibility with current behavior
+            print(transcription)
         sys.exit(0)
     else:
         sys.exit(1)

@@ -250,7 +250,7 @@ def run_transcribe_subprocess(
         logger.info(f"Running transcription subprocess: {transcribe_script} for {input_path}")
         
         result = subprocess.run(
-            [sys.executable, str(transcribe_script), "--model", model, "--input", input_path],
+            [sys.executable, str(transcribe_script), "--model", model, "--input", input_path, "--output", "-"],
             capture_output=True,
             text=True,
             check=False,  # Don't raise on non-zero exit, check returncode manually
