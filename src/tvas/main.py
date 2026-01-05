@@ -20,6 +20,7 @@ from typing import Any
 
 from shared import DEFAULT_VLM_MODEL, get_openrouter_api_key
 from tvas.analysis import analyze_clips_batch
+from tvas.beats import align_beats
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
 from shared.proxy import generate_proxies_batch
 from tvas.timeline import TimelineConfig, create_timeline_from_analysis, export_analysis_json
@@ -450,6 +451,7 @@ Examples:
   tvas --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
   tvas --archival-path /Volumes/MySSD --proxy-path ~/Videos
   tvas --analysis .         Analyze video files in the current directory
+  tvas --beats --outline outline.md  Align clips in current dir to story beats
         """,
     )
 
@@ -471,6 +473,18 @@ Examples:
         nargs='?',
         const=Path('.'),
         help="Analyze video files in a directory (defaults to current directory)",
+    )
+
+    parser.add_argument(
+        "--beats",
+        action="store_true",
+        help="Run beat alignment mode (requires --outline)",
+    )
+
+    parser.add_argument(
+        "--outline",
+        type=Path,
+        help="Path to markdown outline file for beat alignment",
     )
 
     parser.add_argument(
@@ -570,6 +584,30 @@ Examples:
             args.model = "google/gemini-2.5-flash-lite"
     elif args.lmstudio:
         api_base = "http://localhost:1234/v1"
+
+    # Handle Beat Alignment
+    if args.beats:
+        if not args.outline:
+            logger.error("--beats mode requires --outline <path>")
+            sys.exit(1)
+            
+        # Determine directory: args.analysis or current directory
+        target_dir = args.analysis if args.analysis else Path('.')
+        
+        if not target_dir.exists():
+            logger.error(f"Target directory not found: {target_dir}")
+            sys.exit(1)
+            
+        logger.info(f"Running beat alignment in {target_dir} using outline {args.outline}")
+        align_beats(
+            project_dir=target_dir,
+            outline_path=args.outline,
+            model_name=args.model,
+            api_base=api_base,
+            api_key=args.api_key,
+            provider_preferences=args.provider,
+        )
+        sys.exit(0)
 
     app = TVASApp(
         archival_path=args.archival_path,

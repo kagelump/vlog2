@@ -339,3 +339,34 @@ def get_video_info(video_path: Path) -> dict[str, Any] | None:
         pass
 
     return None
+
+
+def extract_frame(video_path: Path, timestamp: float, output_path: Path) -> bool:
+    """Extract a single frame from video at timestamp using FFmpeg.
+
+    Args:
+        video_path: Path to the video file.
+        timestamp: Timestamp in seconds.
+        output_path: Path to save the extracted frame (JPEG).
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    if not check_ffmpeg_available():
+        return False
+
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", str(timestamp),
+        "-i", str(video_path),
+        "-frames:v", "1",
+        "-q:v", "2",
+        str(output_path)
+    ]
+
+    try:
+        subprocess.run(cmd, capture_output=True, check=True, timeout=30)
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError) as e:
+        logger.error(f"Failed to extract frame from {video_path} at {timestamp}: {e}")
+        return False

@@ -89,6 +89,9 @@ class ClipAnalysis:
     created_timestamp: str | None = None  # File creation timestamp (YYYY-MM-DD HH:MM:SS)
     modified_timestamp: str | None = None  # File modification timestamp (YYYY-MM-DD HH:MM:SS)
     thumbnail_timestamp_sec: float | None = None
+    beat_id: str | None = None
+    beat_title: str | None = None
+    beat_reasoning: str | None = None
 def validate_model_output(parsed: Any) -> dict:
     """Validate parsed JSON from the model against DescribeOutput.
 
@@ -465,6 +468,7 @@ def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
     
     # Mapping from ClipAnalysis field names to raw JSON keys (DescribeOutput schema)
     # Fields not listed here are assumed to have the same name in both
+    # Supports dot notation for nested keys (e.g., "beat.beat_id")
     json_key_map = {
         "needs_trim": "trim",
         "suggested_in_point": "start_sec",
@@ -472,8 +476,12 @@ def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
         "vlm_response": "clip_description",
         "vlm_summary": "trim_reason",
         # Metadata fields
-        "created_timestamp": "created_timestamp",
-        "modified_timestamp": "modified_timestamp",
+        "created_timestamp": "metadata.created_timestamp",
+        "modified_timestamp": "metadata.modified_timestamp",
+        # Beat fields
+        "beat_id": "beat.beat_id",
+        "beat_title": "beat.beat_title",
+        "beat_reasoning": "beat.reasoning",
     }
 
     # Dynamically get headers from ClipAnalysis dataclass
@@ -487,16 +495,24 @@ def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
             
             for data in all_results:
                 row = []
-                metadata = data.get("metadata", {})
                 
                 for field in clip_fields:
                     # Determine the key to look for in the JSON data
-                    key = json_key_map.get(field.name, field.name)
+                    key_path = json_key_map.get(field.name, field.name)
                     
-                    # Search in root dict first, then metadata
-                    val = data.get(key)
-                    if val is None:
-                        val = metadata.get(key)
+                    # Navigate dot notation
+                    val = data
+                    for key in key_path.split("."):
+                        if isinstance(val, dict):
+                            val = val.get(key)
+                        else:
+                            val = None
+                            break
+                        
+                    # Fallback for old metadata location (root -> metadata) if explicit path failed
+                    # This preserves backward compatibility if not strictly defined in map
+                    if val is None and key_path == field.name and "metadata" in data:
+                        val = data["metadata"].get(field.name)
                         
                     # Format specific types
                     if isinstance(val, list):
