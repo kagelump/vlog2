@@ -341,13 +341,19 @@ def get_video_info(video_path: Path) -> dict[str, Any] | None:
     return None
 
 
-def extract_frame(video_path: Path, timestamp: float, output_path: Path) -> bool:
+def extract_frame(
+    video_path: Path,
+    timestamp: float,
+    output_path: Path,
+    max_dimension: int | None = None
+) -> bool:
     """Extract a single frame from video at timestamp using FFmpeg.
 
     Args:
         video_path: Path to the video file.
         timestamp: Timestamp in seconds.
         output_path: Path to save the extracted frame (JPEG).
+        max_dimension: Optional maximum dimension (width/height) to resize to.
 
     Returns:
         True if successful, False otherwise.
@@ -361,8 +367,13 @@ def extract_frame(video_path: Path, timestamp: float, output_path: Path) -> bool
         "-i", str(video_path),
         "-frames:v", "1",
         "-q:v", "2",
-        str(output_path)
     ]
+
+    if max_dimension:
+        # Scale to max_dimension while maintaining aspect ratio
+        cmd.extend(["-vf", f"scale='min({max_dimension},iw)':-1"])
+
+    cmd.append(str(output_path))
 
     try:
         subprocess.run(cmd, capture_output=True, check=True, timeout=30)

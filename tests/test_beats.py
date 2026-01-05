@@ -85,10 +85,11 @@ class TestBeatsAlignment:
             align_beats(project_dir, outline_path)
             # Verify extract_frame was called
             mock_extract.assert_called_once()
-            args, _ = mock_extract.call_args
+            args, kwargs = mock_extract.call_args
             assert args[0] == video1
             assert args[1] == 5.0
             assert args[2] == project_dir / "clip1.jpg"
+            assert kwargs.get("max_dimension") == 512
 
     def test_skip_existing_beat(self, tmp_path, mock_vlm_client, mock_aggregate):
         # Setup
@@ -111,6 +112,41 @@ class TestBeatsAlignment:
         
         # Verify aggregation WAS called (even if skipped, we re-aggregate)
         mock_aggregate.assert_called_once_with(project_dir)
+
+    def test_sorting_by_timestamp(self, tmp_path, mock_vlm_client, mock_aggregate):
+        # Setup
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        
+        outline_path = tmp_path / "outline.md"
+        outline_path.write_text("# Outline")
+        
+        # Clip B: later timestamp, "earlier" name
+        json_b = project_dir / "a_clip.json"
+        json_b.write_text(json.dumps({
+            "clip_name": "B",
+            "metadata": {"created_timestamp": "2023-01-01 12:00:00"}
+        }))
+        
+        # Clip A: earlier timestamp, "later" name
+        json_a = project_dir / "z_clip.json"
+        json_a.write_text(json.dumps({
+            "clip_name": "A",
+            "metadata": {"created_timestamp": "2023-01-01 10:00:00"}
+        }))
+        
+        # We want to verify that Clip A (z_clip.json) is processed BEFORE Clip B (a_clip.json)
+        # despite the alphabetical order of filenames.
+        
+        with patch.object(mock_vlm_client, 'generate', side_effect=mock_vlm_client.generate) as mock_gen:
+            align_beats(project_dir, outline_path)
+            
+            # Check order of calls
+            # Call 1 should be for Clip A (10:00:00)
+            # Call 2 should be for Clip B (12:00:00)
+            calls = mock_gen.call_args_list
+            assert "2023-01-01 10:00:00" in str(calls[0])
+            assert "2023-01-01 12:00:00" in str(calls[1])
 
     def test_missing_outline(self, tmp_path, caplog):
         align_beats(tmp_path, tmp_path / "nonexistent.md")

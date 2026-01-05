@@ -28,9 +28,8 @@ Instructions:
 - Analyze the Current Clip's content (description, keywords, time, location) and compare it against the Outline's beats.
 - Determine the most suitable "Beat" for this clip.
 - If the clip does not fit any specific beat well, assign it to "Unassigned" or a generic "B-Roll" beat if appropriate.
-- specific rules:
-    - strict temporal ordering is NOT required, but logical flow is.
-    - look for specific visual cues mentioned in the outline (e.g. "red bag", "sunset").
+- Clips are ordered chronologically, so consider the previous clip's assigned beat for context.
+- look for specific visual cues mentioned in the outline (e.g. "red bag", "sunset").
 
 Output Format:
 Return a valid JSON object with the following fields:
@@ -85,31 +84,35 @@ def align_beats(
     # We assume sidecars are named same as video files + .json?
     # Or just *.json excluding analysis.json?
     # "align all clips in a directory with json sidecars"
-    json_files = sorted(
-        [f for f in project_dir.glob("*.json") if f.name != "analysis.json"],
-        key=lambda x: x.name # Sort by name (usually timestamped)
-    )
-
-    if not json_files:
+    candidate_json_files = [f for f in project_dir.glob("*.json") if f.name != "analysis.json"]
+    
+    if not candidate_json_files:
         logger.warning(f"No clip JSON files found in {project_dir}")
         return
 
-    logger.info(f"Found {len(json_files)} clips to align.")
+    # Sort by created_timestamp in metadata
+    json_with_metadata = []
+    for f in candidate_json_files:
+        data = load_json(f)
+        if data:
+            created_ts = data.get("metadata", {}).get("created_timestamp", "")
+            json_with_metadata.append((f, data, created_ts))
+    
+    # Sort by the timestamp string (YYYY-MM-DD HH:MM:SS)
+    json_with_metadata.sort(key=lambda x: x[2])
+    
+    logger.info(f"Found {len(json_with_metadata)} clips to align.")
 
     previous_clip_data = None
 
-    for i, json_path in enumerate(json_files):
-        current_data = load_json(json_path)
-        if not current_data:
-            continue
-
+    for i, (json_path, current_data, _) in enumerate(json_with_metadata):
         # Skip if already has beat
         if "beat" in current_data:
             logger.info(f"Skipping {json_path.name} (already has beat)")
             previous_clip_data = current_data
             continue
 
-        logger.info(f"Aligning beat for {json_path.name} ({i+1}/{len(json_files)})...")
+        logger.info(f"Aligning beat for {json_path.name} ({i+1}/{len(json_with_metadata)})...")
 
         # Prepare context
         # Handle Thumbnail Generation
@@ -133,7 +136,7 @@ def align_beats(
                 
             if video_path:
                 logger.info(f"Generating thumbnail for {json_path.name} at {thumb_timestamp}s")
-                extract_frame(video_path, thumb_timestamp, thumbnail_path)
+                extract_frame(video_path, thumb_timestamp, thumbnail_path, max_dimension=512)
             else:
                 logger.warning(f"Could not find video file to generate thumbnail for {json_path.name}")
 
