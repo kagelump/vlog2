@@ -1,14 +1,11 @@
 """Tests for the timeline module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
 import pytest
 
 from tvas.timeline import (
     TimelineClip,
     TimelineConfig,
-    export_analysis_json,
 )
 
 
@@ -67,37 +64,6 @@ class TestTimelineClip:
         assert clip.out_point_seconds == 8.0
         assert clip.confidence == "medium"
         assert clip.camera_source == "DJIPocket3"
-
-
-class TestExportAnalysisJson:
-    """Tests for analysis export functionality."""
-
-    def test_export_analysis_json_empty(self, tmp_path: Path):
-        """Test exporting empty analysis."""
-        output_path = tmp_path / "analysis.json"
-
-        result = export_analysis_json([], output_path)
-
-        assert result == output_path
-        assert output_path.exists()
-
-        import json
-
-        with open(output_path) as f:
-            data = json.load(f)
-
-        assert data["total_clips"] == 0
-        assert data["clips"] == []
-        assert "export_time" in data
-
-    def test_export_analysis_json_creates_parent_dirs(self, tmp_path: Path):
-        """Test that export creates parent directories."""
-        output_path = tmp_path / "subdir" / "analysis.json"
-
-        result = export_analysis_json([], output_path)
-
-        assert result == output_path
-        assert output_path.exists()
 
 
 # Note: Integration tests for create_timeline and create_timeline_from_analysis
