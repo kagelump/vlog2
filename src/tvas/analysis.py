@@ -3,26 +3,27 @@
 This module handles AI-powered trim detection using VLMClient (local or API).
 """
 
-from collections.abc import Sequence
-import json
-import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from dataclasses import fields
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-import time
-from typing import Any, Tuple, cast, Optional
+from pydantic import BaseModel, ValidationError
+from threading import Lock
+from typing import Any, Optional
+import csv
+import json
+import logging
+import os
 import subprocess
 import sys
-from pydantic import BaseModel, ValidationError
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
+import time
 
 from shared.proxy import get_video_duration
 from shared import load_prompt, DEFAULT_VLM_MODEL
 from shared.vlm_client import VLMClient
 
-import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 logger = logging.getLogger(__name__)
@@ -449,7 +450,6 @@ def analyze_clip(
     )
 
 
-import csv
 
 def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
     """Export aggregated analysis results to CSV.
@@ -463,31 +463,22 @@ def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
     """
     csv_path = project_dir / "analysis.csv"
     
-    headers = [
-        "Source File",
-        "Proxy Path",
-        "Clip Name",
-        "Duration",
-        "Confidence",
-        "Trim",
-        "In Point",
-        "Out Point",
-        "VLM Response",
-        "Summary",
-        "Audio Description",
-        "Subject Keywords",
-        "Action Keywords",
-        "Time of Day",
-        "Detected Text",
-        "Landmark Identification",
-        "Environment",
-        "People Presence",
-        "Mood",
-        "Timestamp",
-        "Created",
-        "Modified",
-        "Thumbnail Time"
-    ]
+    # Mapping from ClipAnalysis field names to raw JSON keys (DescribeOutput schema)
+    # Fields not listed here are assumed to have the same name in both
+    json_key_map = {
+        "needs_trim": "trim",
+        "suggested_in_point": "start_sec",
+        "suggested_out_point": "end_sec",
+        "vlm_response": "clip_description",
+        "vlm_summary": "trim_reason",
+        # Metadata fields
+        "created_timestamp": "created_timestamp",
+        "modified_timestamp": "modified_timestamp",
+    }
+
+    # Dynamically get headers from ClipAnalysis dataclass
+    clip_fields = fields(ClipAnalysis)
+    headers = [f.name.replace("_", " ").title() for f in clip_fields]
     
     try:
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -495,34 +486,33 @@ def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
             writer.writerow(headers)
             
             for data in all_results:
-                source_path = Path(data.get("source_path", ""))
+                row = []
                 metadata = data.get("metadata", {})
                 
-                writer.writerow([
-                    source_path.name,
-                    data.get("proxy_path") or "",
-                    data.get("clip_name") or "",
-                    f"{data.get('duration_seconds', 0):.2f}",
-                    data.get("confidence", ""),
-                    "Yes" if data.get("trim") else "No",
-                    f"{data.get('start_sec', 0):.2f}" if data.get("start_sec") is not None else "",
-                    f"{data.get('end_sec', 0):.2f}" if data.get("end_sec") is not None else "",
-                    data.get("clip_description") or "",
-                    data.get("trim_reason") or "",
-                    data.get("audio_description") or "",
-                    ", ".join(data.get("subject_keywords", [])) if data.get("subject_keywords") else "",
-                    ", ".join(data.get("action_keywords", [])) if data.get("action_keywords") else "",
-                    data.get("time_of_day") or "",
-                    str(data.get("detected_text", "")) if data.get("detected_text") else "",
-                    str(data.get("landmark_identification", "")) if data.get("landmark_identification") else "",
-                    data.get("environment") or "",
-                    data.get("people_presence") or "",
-                    data.get("mood") or "",
-                    f"{data.get('timestamp', 0):.2f}",
-                    metadata.get("created_timestamp") or "",
-                    metadata.get("modified_timestamp") or "",
-                    f"{data.get('thumbnail_timestamp_sec', 0):.2f}" if data.get("thumbnail_timestamp_sec") is not None else ""
-                ])
+                for field in clip_fields:
+                    # Determine the key to look for in the JSON data
+                    key = json_key_map.get(field.name, field.name)
+                    
+                    # Search in root dict first, then metadata
+                    val = data.get(key)
+                    if val is None:
+                        val = metadata.get(key)
+                        
+                    # Format specific types
+                    if isinstance(val, list):
+                        val = ", ".join(str(x) for x in val)
+                    elif isinstance(val, float):
+                        val = f"{val:.2f}"
+                    elif isinstance(val, bool):
+                        val = "Yes" if val else "No"
+                    elif val is None:
+                        val = ""
+                    else:
+                        val = str(val)
+                        
+                    row.append(val)
+                
+                writer.writerow(row)
         
         logger.info(f"Aggregated analysis CSV exported to {csv_path}")
     except Exception as e:
