@@ -130,7 +130,8 @@ def _get_or_create_vlm_client(
             model_name=model_name,
             api_base=api_base,
             api_key=api_key,
-            provider_preferences=provider_preferences
+            provider_preferences=provider_preferences,
+            app_name="tvas (analysis)"
         )
     
     # For local models in parallel mode, use a shared cached client
@@ -143,7 +144,8 @@ def _get_or_create_vlm_client(
                     model_name=model_name,
                     api_base=api_base,
                     api_key=api_key,
-                    provider_preferences=provider_preferences
+                    provider_preferences=provider_preferences,
+                    app_name="tvas (analysis)"
                 )
             return _cached_vlm_clients[cache_key]
     
@@ -152,7 +154,8 @@ def _get_or_create_vlm_client(
         model_name=model_name,
         api_base=api_base,
         api_key=api_key,
-        provider_preferences=provider_preferences
+        provider_preferences=provider_preferences,
+        app_name="tvas (analysis)"
     )
 
 def analyze_video_segment(

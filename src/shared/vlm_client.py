@@ -60,12 +60,14 @@ class VLMClient:
         model_name: str = "local-model",
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
-        provider_preferences: Optional[str] = None
+        provider_preferences: Optional[str] = None,
+        app_name: str = "tvas"
     ):
         self.model_name = model_name
         self.api_base = api_base
         self.api_key = api_key
         self.provider_preferences = provider_preferences
+        self.app_name = app_name
         self.model = None
         self.processor = None
         self.config = None
@@ -254,7 +256,9 @@ class VLMClient:
 
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
+                "Authorization": f"Bearer {self.api_key}",
+                "HTTP-Referer": "https://github.com/rtkz/vlog2", # Identify the app source
+                "X-Title": self.app_name.upper() # Show app name (TVAS/TPRS) in rankings
             }
             
             payload = {

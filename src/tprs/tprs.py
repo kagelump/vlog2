@@ -939,13 +939,13 @@ def process_photos_batch(
 
     # Initialize VLM Client
     try:
-        client = VLMClient(
-            model_name=model_name,
-            api_base=api_base,
-            api_key=api_key,
-            provider_preferences=provider_preferences
-        )
-    except Exception as e:
+            client = VLMClient(
+                model_name=model_name,
+                api_base=api_base,
+                api_key=api_key,
+                provider_preferences=provider_preferences,
+                app_name="tprs"
+            )    except Exception as e:
         logger.error(f"Failed to initialize VLM Client: {e}")
         return results
 

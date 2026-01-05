@@ -77,7 +77,8 @@ def align_beats(
         model_name=model_name,
         api_base=api_base,
         api_key=api_key,
-        provider_preferences=provider_preferences
+        provider_preferences=provider_preferences,
+        app_name="tvas (beat)"
     )
 
     # Find all JSON sidecars
