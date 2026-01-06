@@ -91,6 +91,7 @@ class ClipAnalysis:
     thumbnail_timestamp_sec: float | None = None
     beat_id: str | None = None
     beat_title: str | None = None
+    beat_classification: str | None = None
     beat_reasoning: str | None = None
 def validate_model_output(parsed: Any) -> dict:
     """Validate parsed JSON from the model against DescribeOutput.
@@ -484,6 +485,7 @@ def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
         # Beat fields
         "beat_id": "beat.beat_id",
         "beat_title": "beat.beat_title",
+        "beat_classification": "beat.classification",
         "beat_reasoning": "beat.reasoning",
     }
 
@@ -579,6 +581,14 @@ def aggregate_analysis_json(project_dir: Path) -> Path:
         
         # Also export CSV
         aggregate_analysis_csv(project_dir, all_results)
+        
+        # Save the path to a magic file for other tools to pick up
+        try:
+            magic_file = Path.home() / ".tvas_current_analysis"
+            magic_file.write_text(str(output_path.resolve()))
+            logger.debug(f"Updated {magic_file}")
+        except Exception as e:
+            logger.warning(f"Failed to update magic file: {e}")
         
     except Exception as e:
         logger.error(f"Failed to write aggregated analysis.json: {e}")

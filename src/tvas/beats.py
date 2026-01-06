@@ -30,13 +30,22 @@ Instructions:
 - If the clip does not fit any specific beat well, assign it to "Unassigned" or a generic "B-Roll" beat if appropriate.
 - Clips are ordered chronologically, so consider the previous clip's assigned beat for context.
 - look for specific visual cues mentioned in the outline (e.g. "red bag", "sunset").
+- Classification:
+    - Determine the value of the clip based *specifically* on the outline's notes.
+    - "HERO": Essential moments, specific "Main Content" or "Establishing/Intro" shots mentioned in the outline.
+    - "HIGHLIGHT": Strong visuals/audio that definitely belong in the edit.
+    - "TRANSITION": Travel segments, maps, walking shots, or explicit transitions mentioned.
+    - "WEAK": Redundant, low quality, or generic footage that doesn't add much.
+    - "REMOVE": Explicitly listed under "Candidate for Removal" in the outline or unusable footage.
+    - null: Standard B-roll that fits the beat but isn't a highlight.
 
 Output Format:
 Return a valid JSON object with the following fields:
 {
   "beat_id": "Beat 1",  // The specific beat header from the outline (e.g. "Beat 1: The Long Haul")
   "beat_title": "The Long Haul", // The title of the beat
-  "reasoning": "The clip shows an airport..." // Brief explanation
+  "classification": "HERO", // HERO | HIGHLIGHT | TRANSITION | WEAK | REMOVE | null
+  "reasoning": "The clip shows an airport..." // Brief explanation including why it was classified this way
 }
 """
 

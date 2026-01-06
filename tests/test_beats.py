@@ -14,7 +14,7 @@ class TestBeatsAlignment:
             client_instance = mock.return_value
             # Mock generate response
             mock_response = MagicMock()
-            mock_response.text = '{"beat_id": "Beat 1", "beat_title": "Test Beat", "reasoning": "Fits well"}'
+            mock_response.text = '{"beat_id": "Beat 1", "beat_title": "Test Beat", "classification": "HIGHLIGHT", "reasoning": "Fits well"}'
             client_instance.generate.return_value = mock_response
             yield client_instance
 

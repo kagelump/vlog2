@@ -269,4 +269,12 @@ def export_analysis_json(
 
     logger.info(f"Analysis exported to {output_path}")
     
+    # Save the path to a magic file for other tools to pick up
+    try:
+        magic_file = Path.home() / ".tvas_current_analysis"
+        magic_file.write_text(str(output_path.resolve()))
+        logger.debug(f"Updated {magic_file}")
+    except Exception as e:
+        logger.warning(f"Failed to update magic file: {e}")
+    
     return output_path

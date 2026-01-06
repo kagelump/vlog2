@@ -43,6 +43,7 @@ class TestCSVExport:
             "beat": {
                 "beat_id": "Beat 1",
                 "beat_title": "The Intro",
+                "classification": "HERO",
                 "reasoning": "Fits well"
             }
         }]
@@ -57,6 +58,7 @@ class TestCSVExport:
         row = rows[0]
         assert row["Beat Id"] == "Beat 1"
         assert row["Beat Title"] == "The Intro"
+        assert row["Beat Classification"] == "HERO"
         assert row["Beat Reasoning"] == "Fits well"
 
     def test_empty_list(self, tmp_path):
