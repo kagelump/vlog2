@@ -16,6 +16,7 @@ import csv
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -587,8 +588,16 @@ def aggregate_analysis_json(project_dir: Path) -> Path:
             magic_file = Path.home() / ".tvas_current_analysis"
             magic_file.write_text(str(output_path.resolve()))
             logger.debug(f"Updated {magic_file}")
+            
+            # Copy Resolve import script to DaVinci Resolve's scripts folder
+            resolve_script_src = Path(__file__).parent.parent / "resolve" / "import_timeline.py"
+            if resolve_script_src.exists():
+                resolve_script_dest_dir = Path.home() / "Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Comp"
+                if resolve_script_dest_dir.exists():
+                    shutil.copy2(resolve_script_src, resolve_script_dest_dir / "import_timeline.py")
+                    logger.debug(f"Copied Resolve script to {resolve_script_dest_dir}")
         except Exception as e:
-            logger.warning(f"Failed to update magic file: {e}")
+            logger.warning(f"Failed to update magic file or copy Resolve script: {e}")
         
     except Exception as e:
         logger.error(f"Failed to write aggregated analysis.json: {e}")

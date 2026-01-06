@@ -31,7 +31,7 @@ Instructions:
 - Clips are ordered chronologically, so consider the previous clip's assigned beat for context.
 - look for specific visual cues mentioned in the outline (e.g. "red bag", "sunset").
 - Classification:
-    - Determine the value of the clip based *specifically* on the outline's notes.
+    - Determine the value of the clip based *specifically* on alignment with the outline's notes.
     - "HERO": Essential moments, specific "Main Content" or "Establishing/Intro" shots mentioned in the outline.
     - "HIGHLIGHT": Strong visuals/audio that definitely belong in the edit.
     - "TRANSITION": Travel segments, maps, walking shots, or explicit transitions mentioned.
