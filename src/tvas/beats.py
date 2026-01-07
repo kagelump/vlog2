@@ -42,7 +42,7 @@ Instructions:
 Output Format:
 Return a valid JSON object with the following fields:
 {
-  "beat_id": "Beat 1",  // The specific beat header from the outline (e.g. "Beat 1: The Long Haul")
+  "beat_id": "Beat 1",  // The specific beat header from the outline (e.g. "Beat 1")
   "beat_title": "The Long Haul", // The title of the beat
   "classification": "HERO", // HERO | HIGHLIGHT | TRANSITION | WEAK | REMOVE | null
   "reasoning": "The clip shows an airport..." // Brief explanation including why it was classified this way

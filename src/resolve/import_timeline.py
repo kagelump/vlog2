@@ -159,7 +159,7 @@ def main():
         item.SetClipColor(clip_color)
         
         # Set Orientation to 0 degrees
-        item.SetClipProperty("Orientation", "0")
+        item.SetClipProperty("Image Orientation", "0")
         
         # Rename clip to clip_name from JSON
         clip_name = clip_info.get("clip_name")
