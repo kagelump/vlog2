@@ -200,6 +200,12 @@ def main():
                 "clips": []
             }
             beat_order.append(beat_id)
+        else:
+            # Consolidate titles: choose the shorter non-empty title to ensure consistency
+            current_title = beats[beat_id]["title"]
+            if beat_title and beat_title.strip():
+                if not current_title or len(beat_title) < len(current_title):
+                    beats[beat_id]["title"] = beat_title
         
         beats[beat_id]["clips"].append(append_entry)
 
