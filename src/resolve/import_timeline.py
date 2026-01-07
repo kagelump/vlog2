@@ -107,7 +107,17 @@ def main():
     
     for i, clip_info in enumerate(data):
         source_path = clip_info.get("source_path")
-        if not source_path or not os.path.exists(source_path):
+        if not source_path:
+            logger.warning(f"No source_path in clip info")
+            continue
+        
+        # Ensure source_path is absolute
+        source_path = Path(source_path)
+        if not source_path.is_absolute():
+            source_path = analysis_path.parent / source_path
+        source_path = str(source_path)
+        
+        if not os.path.exists(source_path):
             logger.warning(f"File not found: {source_path}")
             continue
             
