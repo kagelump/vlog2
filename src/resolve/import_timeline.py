@@ -176,7 +176,7 @@ def main():
         sys.exit(1)
 
     # Create Timeline
-    timeline_name = f"TVAS_Timeline_{import_name}"
+    timeline_name = f"TVAS_Timeline"
     logger.info(f"Creating timeline: {timeline_name}")
     
     # CreateEmptyTimeline is usually available on MediaPool
