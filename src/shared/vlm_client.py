@@ -7,17 +7,47 @@ import subprocess
 import time
 import tempfile
 import platform
+import atexit
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union, List, Any, Tuple, Sequence, cast
+from threading import Lock
 
 logger = logging.getLogger(__name__)
+
+class CostTracker:
+    """Tracks API costs across the application lifecycle."""
+    _total_cost: float = 0.0
+    _lock: Lock = Lock()
+
+    @classmethod
+    def add(cls, amount: float):
+        if amount is None:
+            return
+        with cls._lock:
+            cls._total_cost += float(amount)
+
+    @classmethod
+    def get_total(cls) -> float:
+        with cls._lock:
+            return cls._total_cost
+
+    @classmethod
+    def report(cls):
+        total = cls.get_total()
+        if total > 0:
+            # Using 6 decimal places as costs can be very small
+            print(f"\n💰 Total API Cost: ${total:.6f}")
+
+# Register report on exit
+atexit.register(CostTracker.report)
 
 @dataclass
 class VLMResponse:
     """Response from VLM API."""
     text: str
     provider: Optional[str] = None
+    cost: float = 0.0
 
 def check_lmstudio_running():
     """Check if LM Studio is running locally, or try to start it."""
@@ -288,13 +318,18 @@ class VLMClient:
             
             with urllib.request.urlopen(req) as response:
                 response_data = json.loads(response.read().decode('utf-8'))
-                logging.debug(f"VLM Request: API response: {response_data}")
+                logging.info(f"VLM Request: API response: {response_data}")
                 if 'error' in response_data:
                     logger.error(f"API error: {response_data['error']}")
                     return None
                 text = response_data['choices'][0]['message']['content']
                 provider = response_data.get('provider')
-                return VLMResponse(text=text, provider=provider)
+                
+                # Extract cost from usage if available (OpenRouter format)
+                cost = response_data.get("usage", {}).get("cost", 0.0)
+                CostTracker.add(cost)
+                
+                return VLMResponse(text=text, provider=provider, cost=cost)
 
         except urllib.error.HTTPError as e:
             error_body = e.read().decode('utf-8')

@@ -1,6 +1,8 @@
-"""Stage 3: AI Analysis (Trim Detection)
+"""
+Stage 3: AI Analysis (Description)
 
-This module handles AI-powered trim detection using VLMClient (local or API).
+This module handles AI-powered video description using VLMClient (local or API).
+Technical trim detection is handled separately in Stage 6 (trim.py).
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -105,7 +107,7 @@ def _get_or_create_vlm_client(
     provider_preferences: Optional[str],
     is_parallel: bool = False,
 ) -> VLMClient:
-    """Get or create a VLMClient with thread-safe caching.
+    """Get or create a VLMClient with thread-safe caching. 
     
     For local models in parallel mode, uses a shared client to avoid
     multiple GPU model loads. For API mode, creates per-thread clients.
@@ -430,7 +432,6 @@ def describe_clip(
         modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
         thumbnail_timestamp_sec=vlm_result.get("thumbnail_timestamp_sec"),
     )
-
 
 
 def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:

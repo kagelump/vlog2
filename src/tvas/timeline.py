@@ -26,7 +26,6 @@ class TimelineClip:
     duration_seconds: float
     in_point_seconds: float = 0.0
     out_point_seconds: float | None = None
-    confidence: str = "high"
     camera_source: str = ""
     ai_notes: str = ""
 
