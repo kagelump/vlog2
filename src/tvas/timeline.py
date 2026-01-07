@@ -260,6 +260,12 @@ def export_analysis_json(
                 "created_timestamp": analysis.created_timestamp,
                 "modified_timestamp": analysis.modified_timestamp,
             },
+            "beat": {
+                "beat_id": analysis.beat_id,
+                "beat_title": analysis.beat_title,
+                "classification": analysis.beat_classification,
+                "reasoning": analysis.beat_reasoning,
+            }
         }
         data["clips"].append(clip_data)
 
