@@ -110,10 +110,25 @@ def detect_trim_for_file(
     proxy_path_str = data.get("proxy_path")
     
     video_path = None
-    if proxy_path_str and Path(proxy_path_str).exists():
-        video_path = Path(proxy_path_str)
-    elif source_path_str and Path(source_path_str).exists():
-        video_path = Path(source_path_str)
+    if proxy_path_str:
+        proxy_path = Path(proxy_path_str)
+        if not proxy_path.is_absolute():
+            proxy_path = json_path.parent / proxy_path
+        if proxy_path.exists():
+            video_path = proxy_path
+    
+    if not video_path and source_path_str:
+        source_path = Path(source_path_str)
+        if not source_path.is_absolute():
+            source_path = json_path.parent / source_path
+        if source_path.exists():
+            video_path = source_path
+    
+    # Fallback: use JSON stem + .mp4
+    if not video_path:
+        default_path = json_path.parent / f"{json_path.stem}.mp4"
+        if default_path.exists():
+            video_path = default_path
     
     if not video_path:
         logger.warning(f"No video file found for {json_path.name}")
