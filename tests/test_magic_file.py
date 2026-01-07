@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 from tvas.timeline import export_analysis_json
-from tvas.analysis import aggregate_analysis_json, ClipAnalysis, ConfidenceLevel
+from tvas.analysis import aggregate_analysis_json, ClipAnalysis
 
 class TestMagicFile:
     @pytest.fixture

@@ -15,8 +15,7 @@ class TestCSVExport:
             "trim": True,
             # Map 'start_sec' -> 'suggested_in_point'
             "start_sec": 1.5,
-            "subject_keywords": ["apple", "banana"],
-            "trim_reason": "Boring start" # Maps to vlm_summary
+            "subject_keywords": ["apple", "banana"]
         }]
         
         csv_path = aggregate_analysis_csv(tmp_path, data)
@@ -33,7 +32,6 @@ class TestCSVExport:
         assert row["Needs Trim"] == "Yes"
         assert row["Suggested In Point"] == "1.50"
         assert row["Subject Keywords"] == "apple, banana"
-        assert row["Vlm Summary"] == "Boring start"
 
     def test_aggregate_analysis_csv_nested_beats(self, tmp_path):
         """Test aggregation with nested beat fields."""

@@ -43,7 +43,6 @@ class TestTimelineClip:
 
         assert clip.in_point_seconds == 0.0
         assert clip.out_point_seconds is None
-        assert clip.confidence == "high"
         assert clip.camera_source == ""
         assert clip.ai_notes == ""
 
@@ -55,14 +54,12 @@ class TestTimelineClip:
             duration_seconds=10.0,
             in_point_seconds=2.0,
             out_point_seconds=8.0,
-            confidence="medium",
             camera_source="DJIPocket3",
             ai_notes="Trim suggestion at start",
         )
 
         assert clip.in_point_seconds == 2.0
         assert clip.out_point_seconds == 8.0
-        assert clip.confidence == "medium"
         assert clip.camera_source == "DJIPocket3"
 
 
