@@ -21,6 +21,7 @@ from typing import Any
 from shared import DEFAULT_VLM_MODEL, get_openrouter_api_key
 from tvas.analysis import analyze_clips_batch
 from tvas.beats import align_beats
+from tvas.trim import detect_trims_batch
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
 from shared.proxy import generate_proxies_batch
 from tvas.timeline import TimelineConfig, create_timeline_from_analysis, export_analysis_json
@@ -158,9 +159,20 @@ class TVASApp:
             analysis_json = self.proxy_path / project_name / "analysis.json"
             export_analysis_json(analyses, analysis_json)
             logger.info(f"Analysis exported to {analysis_json}")
+            
+            # Stage 3.5: Trim Detection
+            logger.info("Stage 3.5: Detecting trims...")
+            detect_trims_batch(
+                project_dir=self.proxy_path / project_name,
+                model_name=self.vlm_model,
+                api_base=self.api_base,
+                api_key=self.api_key,
+                provider_preferences=self.provider_preferences,
+                max_workers=self.max_workers,
+            )
         except Exception as e:
-            results["errors"].append(f"Analysis failed: {e}")
-            logger.error(f"Analysis failed: {e}")
+            results["errors"].append(f"Analysis/Trim failed: {e}")
+            logger.error(f"Analysis/Trim failed: {e}")
             raise e
 
         # Stage 4: Generate Timeline (user review happens in DaVinci Resolve)
@@ -363,6 +375,18 @@ class TVASApp:
                 provider_preferences=self.provider_preferences,
                 max_workers=self.max_workers,
             )
+            
+            # Run trim detection
+            logger.info("Detecting trims...")
+            detect_trims_batch(
+                project_dir=directory,
+                model_name=self.vlm_model,
+                api_base=self.api_base,
+                api_key=self.api_key,
+                provider_preferences=self.provider_preferences,
+                max_workers=self.max_workers,
+            )
+            
             results["clips_analyzed"] = len(analyses)
             results["success"] = True
             
@@ -474,11 +498,26 @@ Examples:
         const=Path('.'),
         help="Analyze video files in a directory (defaults to current directory)",
     )
+    
+    parser.add_argument(
+        "--describe",
+        type=Path,
+        nargs='?',
+        const=Path('.'),
+        dest="analysis",
+        help="Alias for --analysis (Describe phase)",
+    )
 
     parser.add_argument(
         "--beats",
         action="store_true",
         help="Run beat alignment mode (requires --outline)",
+    )
+    
+    parser.add_argument(
+        "--trim",
+        action="store_true",
+        help="Run trim detection mode",
     )
 
     parser.add_argument(
@@ -606,6 +645,28 @@ Examples:
             api_base=api_base,
             api_key=args.api_key,
             provider_preferences=args.provider,
+        )
+        sys.exit(0)
+
+    # Handle Trim Detection
+    if args.trim and not args.analysis and not args.volume:
+        # Standalone trim mode (implicit directory or --analysis passed?)
+        # If --analysis is set, it falls through to app.process_directory which we will update.
+        # But if ONLY --trim is set? We need a target.
+        # If --trim is used with --analysis, we want it to run as part of the pipeline or just trim?
+        # "we can run it independently using --trim"
+        
+        # If user runs `tvas --trim`, assume current directory.
+        target_dir = Path('.')
+        
+        logger.info(f"Running trim detection in {target_dir}")
+        detect_trims_batch(
+            project_dir=target_dir,
+            model_name=args.model,
+            api_base=api_base,
+            api_key=args.api_key,
+            provider_preferences=args.provider,
+            max_workers=args.workers,
         )
         sys.exit(0)
 

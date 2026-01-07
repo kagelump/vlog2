@@ -171,12 +171,21 @@ def main():
         if not fps: 
             fps = 60.0
             
-        start_sec = clip_info.get("suggested_in_point")
-        end_sec = clip_info.get("suggested_out_point")
-        duration_sec = clip_info.get("duration_seconds", 0)
-        needs_trim = clip_info.get("needs_trim", False)
+        # Get trim info from nested object, fallback to top-level for backward compatibility or if flattened
+        trim_info = clip_info.get("trim") or clip_info
         
-        append_entry = item
+        start_sec = trim_info.get("suggested_in_point")
+        end_sec = trim_info.get("suggested_out_point")
+        
+        # Duration is usually in metadata or top level
+        duration_sec = clip_info.get("duration_seconds", 0)
+        
+        # Check needs_trim flag
+        needs_trim = trim_info.get("trim_needed")
+        if needs_trim is None:
+             # Fallback to old key
+             needs_trim = trim_info.get("needs_trim", False)
+        
         if needs_trim and (start_sec is not None or end_sec is not None):
             start_frame = int((start_sec or 0.0) * fps)
             total_frames = int(item.GetClipProperty("Frames") or (duration_sec * fps))

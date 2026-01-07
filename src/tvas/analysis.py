@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Video sampling parameters
 VIDEO_FPS = 4.0  # Sample at 4fps for analysis
-VIDEO_ANALYSIS_PROMPT = load_prompt("video_analysis.txt")
+VIDEO_DESCRIBE_PROMPT = load_prompt("video_describe.txt")
 
 # Global lock for thread-safe VLMClient creation (prevents GPU contention in parallel mode)
 _vlm_client_lock = Lock()
@@ -46,10 +46,6 @@ class ConfidenceLevel(Enum):
 
 class DescribeOutput(BaseModel):
     """Structured output from the video description model."""
-    trim: bool
-    start_sec: float | None
-    end_sec: float | None
-    trim_reason: str  | None
     time_of_day: str | None
     detected_text: str | list[str] | None
     landmark_identification: str | list[str] | None
@@ -62,6 +58,13 @@ class DescribeOutput(BaseModel):
     audio_description: str | None = None
     clip_name: str
     thumbnail_timestamp_sec: float | None = None
+
+class TrimOutput(BaseModel):
+    """Structured output from the video trim model."""
+    trim_needed: bool
+    start_sec: float | None
+    end_sec: float | None
+    reason: str | None
 
 @dataclass
 class ClipAnalysis:
@@ -160,7 +163,7 @@ def _get_or_create_vlm_client(
         app_name="tvas (analysis)"
     )
 
-def analyze_video_segment(
+def describe_video_segment(
     video_path: Path,
     model_name: str = DEFAULT_VLM_MODEL,
     fps: float = VIDEO_FPS,
@@ -171,7 +174,7 @@ def analyze_video_segment(
     is_parallel: bool = False,
     transcription: Optional[str] = None,
 ) -> dict:
-    """Analyze a video segment using VLM for trim suggestions.
+    """Analyze a video segment using VLM for description.
 
     Args:
         video_path: Path to the video file (can be proxy or original).
@@ -185,7 +188,7 @@ def analyze_video_segment(
         transcription: Optional transcription text to include in prompt.
 
     Returns:
-        Dictionary with VLM analysis results including trim suggestions.
+        Dictionary with VLM analysis results.
     """
     client = _get_or_create_vlm_client(
         model_name=model_name,
@@ -209,7 +212,7 @@ def analyze_video_segment(
             calculated_frames = duration * fps
 
     response = client.generate_from_video(
-        prompt=VIDEO_ANALYSIS_PROMPT,
+        prompt=VIDEO_DESCRIBE_PROMPT,
         video_path=video_path,
         fps=fps,
         max_pixels=max_pixels,
@@ -281,7 +284,7 @@ def run_transcribe_subprocess(
         return None
 
 
-def analyze_clip(
+def describe_clip(
     source_path: Path,
     proxy_path: Path | None = None,
     use_vlm: bool = True,
@@ -293,7 +296,7 @@ def analyze_clip(
     clip_index: Optional[int] = None,
     total_clips: Optional[int] = None,
 ) -> ClipAnalysis:
-    """Perform complete analysis of a video clip using VLM for trim detection.
+    """Perform complete description analysis of a video clip using VLM.
 
     Args:
         source_path: Path to the original video file.
@@ -308,7 +311,7 @@ def analyze_clip(
         total_clips: Total clips in batch for progress tracking.
 
     Returns:
-        ClipAnalysis with complete analysis results.
+        ClipAnalysis with complete analysis results (trim fields empty).
     """
     if not use_vlm:
         logger.warning("VLM is required for analysis - enabling it")
@@ -343,7 +346,7 @@ def analyze_clip(
         start_time = time.time()
         progress_str = f" [{clip_index}/{total_clips}]" if clip_index and total_clips else ""
         try:
-            vlm_result = analyze_video_segment(
+            vlm_result = describe_video_segment(
                 video_to_analyze,
                 model_name,
                 api_base=api_base,
@@ -355,9 +358,6 @@ def analyze_clip(
             elapsed_time = time.time() - start_time
             logger.info(
                 f"VLM result{progress_str} for {video_to_analyze.name} ({duration}s) took {elapsed_time:.2f} seconds:\n"
-                 f"  Trim: {vlm_result.get('trim')}\n"
-                 f"  In/Out: {vlm_result.get('start_sec')}s to {vlm_result.get('end_sec')}s\n"
-                 f"  Reason: {vlm_result.get('trim_reason')}\n"
                  f"  Time: {vlm_result.get('time_of_day')}\n"
                  f"  Mood: {vlm_result.get('mood')}\n"
                  f"  Environment: {vlm_result.get('environment')}\n"
@@ -407,24 +407,12 @@ def analyze_clip(
 
     # Extract clip name from VLM suggestions
     clip_name = vlm_result.get("clip_name")
-    needs_trim = vlm_result.get("trim", False)
     
-    # Determine trim points from VLM suggestions
-    trim_start = vlm_result.get("start_sec") # Note: DescribeOutput uses start_sec/end_sec
-    trim_end = vlm_result.get("end_sec")
-
-    # Determine confidence based on whether VLM provided suggestions
-    if needs_trim:
-        if trim_start is not None or trim_end is not None:
-            confidence = ConfidenceLevel.HIGH
-        else:
-            confidence = ConfidenceLevel.MEDIUM
-    else:
-        # If no trim needed, we're confident if start/end are null
-        if trim_start is None and trim_end is None:
-            confidence = ConfidenceLevel.HIGH
-        else:
-            confidence = ConfidenceLevel.MEDIUM
+    # Trim detection moved to separate phase
+    needs_trim = False
+    trim_start = None
+    trim_end = None
+    confidence = ConfidenceLevel.MEDIUM # Default until verified
 
     # Get file timestamps
     stat_info = source_path.stat()
@@ -441,7 +429,7 @@ def analyze_clip(
         suggested_in_point=trim_start,
         suggested_out_point=trim_end,
         vlm_response=vlm_result.get("clip_description"),
-        vlm_summary=vlm_result.get("trim_reason"),
+        vlm_summary=None, # trim_reason is removed from description phase
         audio_description=vlm_result.get("audio_description"),
         subject_keywords=vlm_result.get("subject_keywords", []),
         action_keywords=vlm_result.get("action_keywords", []),
@@ -646,7 +634,7 @@ def analyze_clips_batch(
         results = []
         for i, (source_path, proxy_path) in enumerate(clips):
             logger.info(f"Processing clip {i + 1}/{len(clips)}: {source_path.name}")
-            result = analyze_clip(
+            result = describe_clip(
                 source_path,
                 proxy_path,
                 use_vlm,
@@ -665,7 +653,7 @@ def analyze_clips_batch(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_clip = {
                 executor.submit(
-                    analyze_clip,
+                    describe_clip,
                     source_path,
                     proxy_path,
                     use_vlm,
@@ -718,7 +706,6 @@ def analyze_clips_batch(
         aggregate_analysis_json(project_dir)
 
     # Summary logging
-    with_trim = sum(1 for r in results if r.suggested_in_point or r.suggested_out_point)
-    logger.info(f"Analysis complete: {len(results)} clips analyzed, {with_trim} with trim suggestions")
+    logger.info(f"Analysis complete: {len(results)} clips analyzed")
 
     return results

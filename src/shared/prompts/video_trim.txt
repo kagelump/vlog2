@@ -1,0 +1,9 @@
+Analyze the video to identify necessary technical trims.
+Look for camera movement start/stop, blurry intros, reframing, or bad endings.
+Identify the stable start point and stable end point.
+
+Respond in JSON format with the following fields:
+- trim_needed: Boolean describing whether or not trim is needed.
+- start_sec: Suggested start time in seconds (float) relative to the provided video segment.
+- end_sec: Suggested end time in seconds (float) relative to the provided video segment.
+- reason: A brief explanation of why the trim is needed (e.g. "blurry intro", "camera shake at end").
