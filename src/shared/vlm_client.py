@@ -318,7 +318,7 @@ class VLMClient:
             
             with urllib.request.urlopen(req) as response:
                 response_data = json.loads(response.read().decode('utf-8'))
-                logging.info(f"VLM Request: API response: {response_data}")
+                logging.debug(f"VLM Request: API response: {response_data}")
                 if 'error' in response_data:
                     logger.error(f"API error: {response_data['error']}")
                     return None
