@@ -161,8 +161,8 @@ def create_timeline_from_analysis(
         if not isinstance(analysis, ClipAnalysis):
             continue
 
-        # Build AI notes from VLM summary
-        ai_notes = analysis.vlm_summary or ""
+        # Build AI notes from clip description
+        ai_notes = analysis.clip_description or ""
 
         # Use AI-generated clip name if available, otherwise use filename
         clip_name = analysis.clip_name or analysis.source_path.stem
@@ -248,13 +248,11 @@ def export_analysis_json(
             "source_path": str(analysis.source_path),
             "proxy_path": str(analysis.proxy_path) if analysis.proxy_path else None,
             "duration_seconds": analysis.duration_seconds,
-            "confidence": analysis.confidence.value,
             "needs_trim": analysis.needs_trim,
             "clip_name": analysis.clip_name,
             "suggested_in_point": analysis.suggested_in_point,
             "suggested_out_point": analysis.suggested_out_point,
-            "vlm_response": analysis.vlm_response,
-            "vlm_summary": analysis.vlm_summary,
+            "clip_description": analysis.clip_description,
             "timestamp": analysis.timestamp,
             "metadata": {
                 "created_timestamp": analysis.created_timestamp,

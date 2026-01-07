@@ -37,13 +37,6 @@ VIDEO_DESCRIBE_PROMPT = load_prompt("video_describe.txt")
 _vlm_client_lock = Lock()
 _cached_vlm_clients: dict[str, VLMClient] = {}
 
-class ConfidenceLevel(Enum):
-    """Confidence level of trim detection."""
-
-    HIGH = "high"  # VLM with clear reasoning
-    MEDIUM = "medium"  # VLM with uncertain reasoning
-    LOW = "low"  # VLM failed or unclear
-
 class DescribeOutput(BaseModel):
     """Structured output from the video description model."""
     time_of_day: str | None
@@ -73,13 +66,11 @@ class ClipAnalysis:
     source_path: Path
     proxy_path: Path | None
     duration_seconds: float
-    confidence: ConfidenceLevel
     needs_trim: bool = False
     clip_name: str | None = None
     suggested_in_point: float | None = None
     suggested_out_point: float | None = None
-    vlm_response: str | None = None
-    vlm_summary: str | None = None
+    clip_description: str | None = None
     audio_description: str | None = None
     subject_keywords: list[str] | None = None
     action_keywords: list[str] | None = None
@@ -398,8 +389,6 @@ def describe_clip(
                 source_path=source_path,
                 proxy_path=proxy_path,
                 duration_seconds=duration,
-                confidence=ConfidenceLevel.LOW,
-                vlm_summary=f"Analysis failed: {e}",
                 timestamp=modified_ts,
                 created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
                 modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
@@ -412,7 +401,6 @@ def describe_clip(
     needs_trim = False
     trim_start = None
     trim_end = None
-    confidence = ConfidenceLevel.MEDIUM # Default until verified
 
     # Get file timestamps
     stat_info = source_path.stat()
@@ -423,13 +411,11 @@ def describe_clip(
         source_path=source_path,
         proxy_path=proxy_path,
         duration_seconds=duration,
-        confidence=confidence,
         needs_trim=needs_trim,
         clip_name=clip_name,
         suggested_in_point=trim_start,
         suggested_out_point=trim_end,
-        vlm_response=vlm_result.get("clip_description"),
-        vlm_summary=None, # trim_reason is removed from description phase
+        clip_description=vlm_result.get("clip_description"),
         audio_description=vlm_result.get("audio_description"),
         subject_keywords=vlm_result.get("subject_keywords", []),
         action_keywords=vlm_result.get("action_keywords", []),
@@ -466,8 +452,6 @@ def aggregate_analysis_csv(project_dir: Path, all_results: list) -> Path:
         "needs_trim": "trim",
         "suggested_in_point": "start_sec",
         "suggested_out_point": "end_sec",
-        "vlm_response": "clip_description",
-        "vlm_summary": "trim_reason",
         # Metadata fields
         "created_timestamp": "metadata.created_timestamp",
         "modified_timestamp": "metadata.modified_timestamp",
@@ -685,8 +669,6 @@ def analyze_clips_batch(
                         source_path=source_path,
                         proxy_path=proxy_path,
                         duration_seconds=0,
-                        confidence=ConfidenceLevel.LOW,
-                        vlm_summary=f"Analysis failed: {e}",
                         timestamp=modified_ts,
                         created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
                         modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
