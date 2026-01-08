@@ -86,10 +86,13 @@ class ClipAnalysis:
     created_timestamp: str | None = None  # File creation timestamp (YYYY-MM-DD HH:MM:SS)
     modified_timestamp: str | None = None  # File modification timestamp (YYYY-MM-DD HH:MM:SS)
     thumbnail_timestamp_sec: float | None = None
+    analysis_duration: float = 0.0  # Time taken to analyze this clip (seconds), not saved to JSON
     beat_id: str | None = None
     beat_title: str | None = None
     beat_classification: str | None = None
     beat_reasoning: str | None = None
+
+
 def validate_model_output(parsed: Any) -> dict:
     """Validate parsed JSON from the model against DescribeOutput.
 
@@ -317,12 +320,14 @@ def describe_clip(
     # Check for cached analysis
     json_path = video_to_analyze.with_suffix(".json")
     vlm_result = None
+    analysis_duration = 0.0  # Track time spent on this clip (0 for cached)
     
     if json_path.exists():
         try:
             with open(json_path, "r") as f:
                 vlm_result = json.load(f)
             logger.info(f"Using cached analysis for {video_to_analyze.name}")
+            analysis_duration = 0.0  # Cached results take negligible time
         except Exception as e:
             logger.warning(f"Failed to load cached analysis from {json_path}: {e}")
 
@@ -350,6 +355,7 @@ def describe_clip(
                 transcription=transcription_text
             )
             elapsed_time = time.time() - start_time
+            analysis_duration = elapsed_time
             logger.info(
                 f"VLM result{progress_str} for {video_to_analyze.name} ({duration}s) took {elapsed_time:.2f} seconds:\n"
                  f"  Time: {vlm_result.get('time_of_day')}\n"
@@ -395,6 +401,7 @@ def describe_clip(
                 timestamp=modified_ts,
                 created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
                 modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                analysis_duration=0.0,  # Failed analysis
             )
 
     # Extract clip name from VLM suggestions
@@ -432,6 +439,7 @@ def describe_clip(
         created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
         modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
         thumbnail_timestamp_sec=vlm_result.get("thumbnail_timestamp_sec"),
+        analysis_duration=analysis_duration,
     )
 
 
@@ -677,6 +685,7 @@ def analyze_clips_batch(
                         timestamp=modified_ts,
                         created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
                         modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                        analysis_duration=0.0,  # Failed analysis
                     )
                     results_map[index] = failed_result
                     if progress_callback:

@@ -220,6 +220,8 @@ class TvasStatusApp(toga.App):
         self.stop_event = threading.Event()
         self.on_exit = self.exit_handler
         self.analysis_start_time = None
+        self.total_processing_time = 0.0
+        self.items_with_timing = 0
         self.project_name: Optional[str] = None
         self.outline_path: Optional[Path] = None
 
@@ -861,6 +863,8 @@ class TvasStatusApp(toga.App):
         self.total_count = len(clips_to_analyze)
         self.progress_bar.max = self.total_count
         self.analysis_start_time = time.time()
+        self.total_processing_time = 0.0
+        self.items_with_timing = 0
         
         try:
             loop = asyncio.get_running_loop()
@@ -1086,12 +1090,26 @@ class TvasStatusApp(toga.App):
         self.processed_count = processed
         self.progress_bar.value = processed
         
-        # Calculate ETA
+        # Track actual processing time for accurate ETA
+        if analysis and analysis.analysis_duration > 0:
+            self.total_processing_time += analysis.analysis_duration
+            self.items_with_timing += 1
+        
+        # Calculate ETA based on actual processing times
         if self.analysis_start_time and processed > 0:
-            elapsed = time.time() - self.analysis_start_time
-            avg_speed = elapsed / processed
+            # Use actual measured processing times if available
+            if self.items_with_timing > 0:
+                # Average processing time per item, adjusted for parallel workers
+                avg_processing_time = self.total_processing_time / self.items_with_timing
+                # Wall-clock time per item = processing time / number of workers
+                avg_speed = avg_processing_time / max(1, self.max_workers)
+            else:
+                # Fallback to wall-clock average if no timing data yet
+                elapsed = time.time() - self.analysis_start_time
+                avg_speed = elapsed / processed
+            
             remaining = total - processed
-            eta_seconds = remaining * avg_speed
+            eta_seconds = max(0, remaining * avg_speed)
             
             if eta_seconds < 60:
                 eta_str = f"{int(eta_seconds)}s"
