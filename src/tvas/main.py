@@ -453,14 +453,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  tvas                      Auto-detect camera SD card and ACASIS archival storage
-  tvas --watch              Start watching for SD cards
-  tvas --gui                Launch the status GUI
-  tvas --gui --analysis .   Launch GUI with folder pre-selected
-  tvas --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
-  tvas --archival-path /Volumes/MySSD --proxy-path ~/Videos
-  tvas --analysis .         Analyze video files in the current directory
-  tvas --beats --outline outline.md  Align clips in current dir to story beats
+  tvas                      Auto-detect camera SD card and launch GUI
+  tvas --watch --headless   Start watching for SD cards in headless mode
+  tvas --headless --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
+  tvas --headless --archival-path /Volumes/MySSD --proxy-path ~/Videos
+  tvas --headless --analysis .         Analyze video files in the current directory
+  tvas --headless --beats --outline outline.md  Align clips in current dir to story beats
         """,
     )
 
@@ -471,9 +469,9 @@ Examples:
     )
 
     parser.add_argument(
-        "--gui",
+        "--headless",
         action="store_true",
-        help="Launch the status GUI for visual monitoring",
+        help="Run in headless mode without GUI (default is GUI mode)",
     )
 
     parser.add_argument(
@@ -615,8 +613,8 @@ Examples:
     elif args.lmstudio:
         api_base = "http://localhost:1234/v1"
 
-    # Handle GUI mode
-    if args.gui:
+    # Handle GUI mode (default)
+    if not args.headless:
         from tvas.ui import main as ui_main
         
         # Resolve paths using shared logic
