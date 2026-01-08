@@ -657,7 +657,7 @@ class TvasStatusApp(toga.App):
     async def select_sd_card(self, widget):
         """Select SD card folder manually."""
         try:
-            folder = await self.main_window.select_folder_dialog(title="Select SD card volume")
+            folder = await self.main_window.dialog(toga.SelectFolderDialog(title="Select SD card volume"))
             if folder:
                 self.sd_card_path = Path(folder)
                 self.sd_input.value = str(self.sd_card_path)
@@ -697,7 +697,7 @@ class TvasStatusApp(toga.App):
     async def select_project_folder(self, widget):
         """Select project folder manually."""
         try:
-            folder = await self.main_window.select_folder_dialog(title="Select project folder")
+            folder = await self.main_window.dialog(toga.SelectFolderDialog(title="Select project folder"))
             if folder:
                 self.project_path = Path(folder)
                 self.project_input.value = str(self.project_path)
@@ -735,7 +735,7 @@ class TvasStatusApp(toga.App):
     async def select_proxy_folder(self, widget):
         """Select proxy folder manually."""
         try:
-            folder = await self.main_window.select_folder_dialog(title="Select proxy folder")
+            folder = await self.main_window.dialog(toga.SelectFolderDialog(title="Select proxy folder"))
             if folder:
                 self.proxy_path = Path(folder)
                 self.proxy_input.value = str(self.proxy_path)
@@ -747,10 +747,10 @@ class TvasStatusApp(toga.App):
     async def select_outline_file(self, widget):
         """Select outline file for beat alignment."""
         try:
-            file = await self.main_window.open_file_dialog(
+            file = await self.main_window.dialog(toga.OpenFileDialog(
                 title="Select outline file",
                 file_types=["md", "txt"]
-            )
+            ))
             if file:
                 self.outline_path = Path(file)
                 self.outline_input.value = str(self.outline_path)
