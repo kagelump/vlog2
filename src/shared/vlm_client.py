@@ -172,7 +172,7 @@ class VLMClient:
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(video_path),
-                "-vf", f"fps={fps},scale='min(1280,iw)':-2"
+                "-vf", f"fps={fps},scale='min(768,iw)':-2"
             ] + codec_flags + [
                 "-an",
                 str(temp_output)
