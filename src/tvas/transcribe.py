@@ -82,7 +82,8 @@ def run_transcribe(
         
         if not speech_timestamps:
             logging.info("No speech segments detected. Skipping transcription.")
-            return None
+            # Exit with code 2 to indicate 'no speech' (normal condition)
+            sys.exit(2)
         
         logging.info("Found %d speech segments", len(speech_timestamps))
         
@@ -180,6 +181,8 @@ if __name__ == "__main__":
                 f.write(transcription + "\n")
             
             logging.info("Transcription completed: %s", output_file)
-        sys.exit(0)
+        sys.exit(0)  # Success
     else:
+        # Could be 'no speech' or actual error - check what happened
+        # For now, exit with 1 (error)
         sys.exit(1)

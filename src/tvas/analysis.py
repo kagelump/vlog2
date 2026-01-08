@@ -261,17 +261,18 @@ def run_transcribe_subprocess(
             check=False,  # Don't raise on non-zero exit, check returncode manually
         )
         
-        if result.returncode != 0:
-            if result.returncode == 1 and not result.stderr:
-                 # Usually means no speech detected or handled error
-                 logger.info(f"Transcription process exited with code 1 (likely no speech): {input_path}")
-                 return None
-            
-            logger.warning(f"Transcription failed with code {result.returncode}: {result.stderr}")
+        if result.returncode == 0:
+            # Success
+            return result.stdout.strip()
+        elif result.returncode == 2:
+            # No speech detected - this is a normal condition, not an error
+            logger.info(f"No speech detected in {input_path}")
+            return None
+        else:
+            # Other errors
+            logger.warning(f"Transcription failed with code {result.returncode}: {result.stdout}\n{result.stderr}")
             return None
             
-        return result.stdout.strip()
-        
     except Exception as e:
         logger.error(f"Failed to run transcription subprocess: {e}")
         return None
