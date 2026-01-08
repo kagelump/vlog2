@@ -44,12 +44,13 @@ def generate_trim_proxy(video_path: Path) -> Path | None:
 
     try:
         # Construct filter_complex to concat start and end
-        # Use a slightly shorter duration to avoid potential EOF issues with trim
-        safe_duration = duration - 0.1
+        # [0:v]trim=0:5,setpts=PTS-STARTPTS[v0];
+        # [0:v]trim=duration-5:duration,setpts=PTS-STARTPTS[v1];
+        # [v0][v1]concat=n=2:v=1:a=0[outv]
         
         filter_complex = (
             f"[0:v]trim=0:{TRIM_CONTEXT_SECONDS},setpts=PTS-STARTPTS[v0];"
-            f"[0:v]trim={safe_duration-TRIM_CONTEXT_SECONDS}:{safe_duration},setpts=PTS-STARTPTS[v1];"
+            f"[0:v]trim={duration-TRIM_CONTEXT_SECONDS}:{duration},setpts=PTS-STARTPTS[v1];"
             f"[v0][v1]concat=n=2:v=1[outv]"
         )
         
