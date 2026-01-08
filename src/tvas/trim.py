@@ -14,7 +14,8 @@ from typing import Optional, Any
 
 from shared import DEFAULT_VLM_MODEL, load_prompt
 from shared.vlm_client import VLMClient
-from shared.proxy import get_video_duration, check_ffmpeg_available
+from shared.proxy import get_video_duration
+from shared.ffmpeg_utils import detect_best_video_codec, check_ffmpeg_available
 from tvas.analysis import ClipAnalysis, aggregate_analysis_json
 
 logger = logging.getLogger(__name__)
@@ -54,17 +55,14 @@ def generate_trim_proxy(video_path: Path) -> Path | None:
         )
         
         # We explicitly disable audio (-an) to avoid complexity with audio stream matching
-        # Use h264_videotoolbox on macOS for hardware acceleration (always available)
-        # Fall back to libx264 on other platforms
-        import platform
-        encoder = "h264_videotoolbox" if platform.system() == "Darwin" else "libx264"
+        codec_flags = detect_best_video_codec()
         
         cmd = [
             "ffmpeg", "-y", "-v", "error",
             "-i", str(video_path),
             "-filter_complex", filter_complex,
-            "-map", "[outv]",
-            "-c:v", encoder,
+            "-map", "[outv]"
+        ] + codec_flags + [
             "-an", 
             str(output_path)
         ]
