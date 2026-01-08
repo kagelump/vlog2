@@ -1021,7 +1021,12 @@ class TvasStatusApp(toga.App):
         return None
 
     def update_ui(self, processed: int, total: int, analysis: ClipAnalysis):
-        """Update UI elements."""
+        """Update UI elements.
+        
+        Note: Preview image loading is deferred during parallel processing to avoid
+        blocking the main thread with ffmpeg calls. Users can click 'View' to see
+        full previews on demand.
+        """
         self.processed_count = processed
         self.progress_bar.value = processed
         
@@ -1039,19 +1044,11 @@ class TvasStatusApp(toga.App):
                 
             self.status_label.text = f"Processing: {processed}/{total} | ETA: {eta_str}"
         
-        # Update main view if not in review mode
+        # Update clip name but skip heavy preview loading during parallel processing
+        # to avoid blocking the main thread and causing UI thread crashes
         if not self.is_review_mode and analysis:
             self.clip_label.text = analysis.source_path.name
-            
-            video_path = analysis.proxy_path or analysis.source_path
-            timestamp = analysis.thumbnail_timestamp_sec or 1.0
-            
-            try:
-                img = self.load_preview_image(video_path, timestamp)
-                if img:
-                    self.image_view.image = img
-            except Exception as e:
-                logger.warning(f"Failed to load preview: {e}")
+            # Skip live preview image loading - users can click 'View' for full preview
 
         if analysis:
             self.add_recent_clip(analysis)
@@ -1137,34 +1134,32 @@ class TvasStatusApp(toga.App):
         self.clip_label.text = "Resuming live view..."
 
     def add_recent_clip(self, analysis: ClipAnalysis):
-        """Add a thumbnail to the recent clips strip."""
+        """Add a thumbnail to the recent clips strip.
+        
+        Note: Thumbnail extraction is skipped during rapid updates to avoid
+        blocking the main thread and causing GC-related crashes when UI widgets
+        are finalized from background threads.
+        """
+        # Limit the number of recent clips to prevent unbounded UI widget growth
+        # Remove oldest clips if we have too many (widgets must be removed on main thread)
+        max_recent = 20
+        while len(self.recent_box.children) >= max_recent:
+            try:
+                oldest = self.recent_box.children[-1]
+                self.recent_box.remove(oldest)
+            except Exception:
+                break
+        
         thumb_box = toga.Box(style=Pack(direction=COLUMN, width=140, margin=5))
         
-        try:
-            video_path = analysis.proxy_path or analysis.source_path
-            timestamp = analysis.thumbnail_timestamp_sec or 1.0
-            thumb_bytes = self._extract_thumbnail(video_path, timestamp)
-            
-            if thumb_bytes:
-                toga_img = toga.Image(src=thumb_bytes)
-                image_view = toga.ImageView(image=toga_img, style=Pack(height=80, width=120))
-                thumb_box.add(image_view)
-            
-            view_btn = toga.Button(
-                "View", 
-                on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
-                style=Pack(width=120)
-            )
-            thumb_box.add(view_btn)
-            
-        except Exception as e:
-            logger.warning(f"Failed to create thumbnail view: {e}")
-            view_widget = toga.Button(
-                "View", 
-                on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
-                style=Pack(height=80, width=120)
-            )
-            thumb_box.add(view_widget)
+        # Create a simple placeholder button instead of extracting thumbnails
+        # This avoids blocking the main thread with ffmpeg calls during rapid updates
+        view_btn = toga.Button(
+            "View", 
+            on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
+            style=Pack(height=80, width=120)
+        )
+        thumb_box.add(view_btn)
         
         clip_name = analysis.clip_name or analysis.source_path.stem
         if len(clip_name) > 18:
@@ -1176,6 +1171,9 @@ class TvasStatusApp(toga.App):
         thumb_box.add(duration_label)
         
         self.recent_box.insert(0, thumb_box)
+        
+        # Store reference to prevent premature GC
+        self.recent_clips.append(analysis)
 
 
 def main(
