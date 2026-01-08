@@ -11,7 +11,6 @@ license = {text = "MIT"}
 requires-python = ">=3.11"
 dependencies = [
     "watchdog>=3.0.0",
-    "opentimelineio>=0.17.0",
     "opencv-python>=4.8.0",
     "mlx-vlm>=0.3.0",
     "toga>=0.4.0",

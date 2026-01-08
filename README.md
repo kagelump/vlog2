@@ -57,7 +57,7 @@ or you simply prefer faster processing, you can use a cloud provider.
 - **AI Analysis**: Uses Qwen3-VL (8B) via mlx-vlm for intelligent junk detection on Apple Silicon
 - **OpenCV Pre-screening**: Fast blur and darkness detection before VLM analysis
 - **Review UI**: Native macOS UI (Toga) for reviewing AI decisions
-- **Timeline Generation**: Creates OpenTimelineIO files for DaVinci Resolve import
+- **Timeline Generation**: Generates an import script for DaVinci Resolve
 
 ### TPRS (Travel Photo Rating System)
 
@@ -217,7 +217,7 @@ After running `tprs`, the XMP sidecar files will be created next to your photos.
 1. **Ingestion**: Copy files from SD card with verification
 2. **Proxy Generation**: Create ProRes edit proxies using FFmpeg
 3. **AI Analysis**: Generate clip names and suggest trim points using Qwen3 VL (8B)
-4. **Timeline Generation**: Export OpenTimelineIO for DaVinci Resolve (review/editing done in Resolve)
+4. **Timeline Generation**: Run the generated script in DaVinci Resolve to import clips and build timeline
 
 ## Configuration
 

@@ -24,7 +24,6 @@ from tvas.beats import align_beats
 from tvas.trim import detect_trims_batch
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
 from shared.proxy import generate_proxies_batch
-from tvas.timeline import TimelineConfig, create_timeline_from_analysis, export_analysis_json
 from tvas.watcher import VolumeWatcher, check_watchdog_available, find_camera_volumes, is_camera_volume
 
 # Configure logging
@@ -154,16 +153,11 @@ class TVASApp:
                 max_workers=self.max_workers,
             )
             results["clips_analyzed"] = len(analyses)
-
-            # Export analysis for debugging
-            analysis_json = self.proxy_path / project_name / "analysis.json"
-            export_analysis_json(analyses, analysis_json)
-            logger.info(f"Analysis exported to {analysis_json}")
             
             # Stage 3.5: Trim Detection
             logger.info("Stage 3.5: Detecting trims...")
             detect_trims_batch(
-                project_dir=self.proxy_path / project_name,
+                project_dir=proxy_dir if proxy_dir.exists() else (self.proxy_path / project_name),
                 model_name=self.vlm_model,
                 api_base=self.api_base,
                 api_key=self.api_key,
@@ -175,29 +169,18 @@ class TVASApp:
             logger.error(f"Analysis/Trim failed: {e}")
             raise e
 
-        # Stage 4: Generate Timeline (user review happens in DaVinci Resolve)
-        logger.info("Stage 4: Generating timeline...")
-        timeline_path = (
-            self.proxy_path
-            / project_name
-            / f"{project_name}_timeline.otio"
-        )
-
-        try:
-            result_path = create_timeline_from_analysis(
-                analyses,
-                timeline_path,
-                TimelineConfig(name=project_name),
-            )
-            if result_path:
-                results["timeline_path"] = str(result_path)
-                results["success"] = True
-                logger.info(f"Timeline created: {result_path}")
-            else:
-                results["errors"].append("Timeline generation returned None")
-        except Exception as e:
-            results["errors"].append(f"Timeline generation failed: {e}")
-            logger.error(f"Timeline generation failed: {e}")
+        # Stage 4: Timeline Ready (user review happens in DaVinci Resolve)
+        logger.info("Stage 4: Ready for DaVinci Resolve")
+        analysis_json = (proxy_dir if proxy_dir.exists() else (self.proxy_path / project_name)) / "analysis.json"
+        
+        if analysis_json.exists():
+            results["timeline_path"] = str(analysis_json)
+            results["success"] = True
+            logger.info(f"Analysis complete. Ready to import in Resolve: {analysis_json}")
+            logger.info("Run the 'Import Timeline' script in DaVinci Resolve.")
+        else:
+            results["errors"].append("Analysis JSON not found")
+            logger.error("Analysis JSON not found")
 
         return results
 
