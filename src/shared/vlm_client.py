@@ -244,7 +244,7 @@ class VLMClient:
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
-                "HTTP-Referer": "https://github.com/rtkz/vlog2", # Identify the app source
+                "HTTP-Referer": "https://github.com/kagelump/vlog2", # Identify the app source
                 "X-Title": self.app_name.upper() # Show app name (TVAS/TPRS) in rankings
             }
             
