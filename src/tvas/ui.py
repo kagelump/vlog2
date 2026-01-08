@@ -23,6 +23,7 @@ from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
 
 from shared import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override, get_openrouter_api_key
+from shared.vlm_client import CostTracker
 from shared.paths import detect_archival_root, find_latest_project
 from tvas.analysis import ClipAnalysis, analyze_clips_batch
 from tvas.trim import detect_trims_batch
@@ -448,9 +449,10 @@ class TvasStatusApp(toga.App):
         self.update_mode_label()
         
         self.status_label = toga.Label("Ready", style=Pack(margin=(5, 5), flex=1))
+        self.cost_label = toga.Label("", style=Pack(margin=(5, 5), color="#888888"))
         
         status_row = toga.Box(
-            children=[self.mode_label, self.status_label],
+            children=[self.mode_label, self.status_label, self.cost_label],
             style=Pack(direction=ROW)
         )
 
@@ -843,8 +845,12 @@ class TvasStatusApp(toga.App):
             
             analyses = await loop.run_in_executor(None, do_analysis)
             
-            logger.info(f"Analysis complete: {len(analyses)} clips")
-            self.status_label.text = f"Analysis complete: {len(analyses)} clips"
+            # Display cumulative cost
+            total_cost = CostTracker.get_total()
+            cost_msg = f" | Cost: ${total_cost:.4f}" if total_cost > 0 else ""
+            
+            logger.info(f"Analysis complete: {len(analyses)} clips{cost_msg}")
+            self.status_label.text = f"Analysis complete: {len(analyses)} clips{cost_msg}"
             
         except Exception as e:
             logger.error(f"Analysis failed: {e}")
@@ -877,8 +883,13 @@ class TvasStatusApp(toga.App):
                 )
             
             await loop.run_in_executor(None, do_trims)
-            logger.info("Trim detection complete")
-            self.status_label.text = "Trim detection complete"
+            
+            # Display cumulative cost
+            total_cost = CostTracker.get_total()
+            cost_msg = f" | Cost: ${total_cost:.4f}" if total_cost > 0 else ""
+            
+            logger.info(f"Trim detection complete{cost_msg}")
+            self.status_label.text = f"Trim detection complete{cost_msg}"
             
         except Exception as e:
             logger.error(f"Trim detection failed: {e}")
@@ -915,8 +926,13 @@ class TvasStatusApp(toga.App):
                 )
             
             await loop.run_in_executor(None, do_beats)
-            logger.info("Beat alignment complete")
-            self.status_label.text = "Beat alignment complete"
+            
+            # Display cumulative cost
+            total_cost = CostTracker.get_total()
+            cost_msg = f" | Cost: ${total_cost:.4f}" if total_cost > 0 else ""
+            
+            logger.info(f"Beat alignment complete{cost_msg}")
+            self.status_label.text = f"Beat alignment complete{cost_msg}"
             
         except Exception as e:
             logger.error(f"Beat alignment failed: {e}")
@@ -1043,6 +1059,11 @@ class TvasStatusApp(toga.App):
                 eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s"
                 
             self.status_label.text = f"Processing: {processed}/{total} | ETA: {eta_str}"
+        
+        # Update cumulative cost display if in API mode
+        total_cost = CostTracker.get_total()
+        if total_cost > 0:
+            self.cost_label.text = f"💰 ${total_cost:.4f}"
         
         # Update clip name but skip heavy preview loading during parallel processing
         # to avoid blocking the main thread and causing UI thread crashes
