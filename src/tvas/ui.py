@@ -284,54 +284,63 @@ class TvasStatusApp(toga.App):
         # === PHASE BUTTONS SECTION (LEFT SIDE) ===
         phase_section_label = toga.Label("Pipeline Phases", style=Pack(font_weight='bold', margin=(10, 10, 5, 10)))
         
+        # Individual phase buttons
         self.copy_btn = toga.Button(
             "1. Copy from SD",
             on_press=self.run_copy_phase,
             enabled=False,
-            style=Pack(margin=5)
+            style=Pack(margin=(2, 5), height=32)
         )
         self.proxy_btn = toga.Button(
             "2. Generate Proxies",
             on_press=self.run_proxy_phase,
             enabled=False,
-            style=Pack(margin=5)
+            style=Pack(margin=(2, 5), height=32)
         )
         self.analyze_btn = toga.Button(
             "3. AI Analysis",
             on_press=self.run_analysis_phase,
             enabled=False,
-            style=Pack(margin=5)
+            style=Pack(margin=(2, 5), height=32)
         )
         self.beats_btn = toga.Button(
             "4. Beat Alignment",
             on_press=self.run_beats_phase,
             enabled=False,
-            style=Pack(margin=5)
+            style=Pack(margin=(2, 5), height=32)
         )
         self.trim_btn = toga.Button(
             "5. Trim Detection",
             on_press=self.run_trim_phase,
             enabled=False,
-            style=Pack(margin=5)
+            style=Pack(margin=(2, 5), height=32)
         )
         
-        # Run All and Settings
+        # Divider line
+        divider1 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
+        
+        # Run pipeline buttons - more prominent
         self.run_ingest_btn = toga.Button(
             "▶ Run Ingestion (1-3)",
             on_press=self.run_ingestion_pipeline,
             enabled=False,
-            style=Pack(margin=5, color='blue')
+            style=Pack(margin=(2, 5), height=36, font_weight='bold')
         )
         self.run_post_btn = toga.Button(
             "▶ Run Post-Processing (4-5)",
             on_press=self.run_post_pipeline,
             enabled=False,
-            style=Pack(margin=5, color='purple')
+            style=Pack(margin=(2, 5), height=36, font_weight='bold')
         )
+        
+        # Divider line
+        divider2 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
+        
+        # Settings button
         self.settings_btn = toga.Button(
             "Settings",
             on_press=self.open_settings,
-            style=Pack(margin=5)
+            style=Pack(margin=(2, 5), height=32)
         )
         
         phase_box = toga.Box(
@@ -342,12 +351,14 @@ class TvasStatusApp(toga.App):
                 self.analyze_btn,
                 self.beats_btn,
                 self.trim_btn,
-                toga.Box(style=Pack(flex=1)),  # Spacer
+                divider1,
                 self.run_ingest_btn,
                 self.run_post_btn,
+                divider2,
+                toga.Box(style=Pack(flex=1)),  # Spacer
                 self.settings_btn
             ],
-            style=Pack(direction=COLUMN, margin=5, width=200)
+            style=Pack(direction=COLUMN, margin=5, width=180)
         )
         
         # === PATH SELECTION SECTION (RIGHT SIDE) ===
@@ -407,12 +418,15 @@ class TvasStatusApp(toga.App):
         if self.proxy_path:
             self.proxy_input.value = str(self.proxy_path)
         self.proxy_browse_btn = toga.Button("Browse...", on_press=self.select_proxy_folder, style=Pack(margin=(0, 5)))
+        # Spacer button to align with rows that have two buttons
+        proxy_spacer = toga.Box(style=Pack(width=65, margin=(0, 5)))
         
         proxy_row = toga.Box(
             children=[
                 toga.Label("Proxy:", style=Pack(margin=(5, 5), width=100)),
                 self.proxy_input,
                 self.proxy_browse_btn,
+                proxy_spacer,
             ],
             style=Pack(direction=ROW, margin=5)
         )
@@ -424,12 +438,15 @@ class TvasStatusApp(toga.App):
             style=Pack(flex=1, margin=(0, 5))
         )
         self.outline_browse_btn = toga.Button("Browse...", on_press=self.select_outline_file, style=Pack(margin=(0, 5)))
+        # Spacer to align with rows that have two buttons
+        outline_spacer = toga.Box(style=Pack(width=65, margin=(0, 5)))
         
         outline_row = toga.Box(
             children=[
                 toga.Label("Outline:", style=Pack(margin=(5, 5), width=100)),
                 self.outline_input,
                 self.outline_browse_btn,
+                outline_spacer,
             ],
             style=Pack(direction=ROW, margin=5)
         )
@@ -464,6 +481,13 @@ class TvasStatusApp(toga.App):
             style=Pack(margin=(0, 10), font_family="monospace", font_size=10, flex=1)
         )
         
+        self.stop_button = toga.Button(
+            "⏹ Stop",
+            on_press=self.stop_processing,
+            enabled=False,
+            style=Pack(margin=(0, 5), width=70)
+        )
+        
         self.resume_button = toga.Button(
             "Resume Live View",
             on_press=self.resume_live_view,
@@ -472,7 +496,7 @@ class TvasStatusApp(toga.App):
         )
 
         log_row = toga.Box(
-            children=[self.log_label, self.resume_button],
+            children=[self.log_label, self.stop_button, self.resume_button],
             style=Pack(direction=ROW, align_items=CENTER)
         )
         
@@ -682,7 +706,18 @@ class TvasStatusApp(toga.App):
     def _set_running(self, running: bool):
         """Set running state and update buttons."""
         self.is_running = running
+        self.stop_button.enabled = running
+        if not running:
+            self.stop_event.clear()  # Reset stop event when not running
         self._update_button_states()
+    
+    async def stop_processing(self, widget):
+        """Stop the current processing operation."""
+        if self.is_running:
+            logger.info("Stopping processing...")
+            self.stop_event.set()
+            self.status_label.text = "Stopping..."
+            self.stop_button.enabled = False
         
     def _get_project_name(self) -> str:
         """Get or generate project name."""
