@@ -60,7 +60,6 @@ def generate_trim_proxy(video_path: Path) -> Path | None:
             "-filter_complex", filter_complex,
             "-map", "[outv]",
             "-c:v", "libx264",
-            "-preset", "ultrafast",
             "-an", 
             str(output_path)
         ]
