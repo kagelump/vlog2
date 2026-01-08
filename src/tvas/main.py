@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from shared import DEFAULT_VLM_MODEL, get_openrouter_api_key
+from shared.paths import detect_archival_root, resolve_project_path
 from tvas.analysis import analyze_clips_batch
 from tvas.beats import align_beats
 from tvas.trim import detect_trims_batch
@@ -62,20 +63,19 @@ class TVASApp:
             provider_preferences: Comma-separated list of preferred providers (for OpenRouter).
             max_workers: Number of parallel workers for analysis.
         """
-        # Auto-detect ACASIS volume for archival
-        if archival_path is None:
-            acasis_path = Path("/Volumes/Acasis")
-            if acasis_path.exists():
-                self.archival_path = acasis_path
-                logger.info(f"Auto-detected archival storage: {acasis_path}")
-            else:
-                self.archival_path = None
-                logger.info("No archival storage found - will skip file copying")
+        # Auto-detect archival path if not provided
+        self.archival_path = detect_archival_root(archival_path)
+        
+        if self.archival_path:
+            # Only log if we auto-detected it (i.e. original arg was None)
+            if archival_path is None:
+                logger.info(f"Auto-detected archival storage: {self.archival_path}")
         else:
-            self.archival_path = archival_path
+            logger.info("No archival storage found - will skip file copying")
         
         self.proxy_path = proxy_path or Path.home() / "Movies" / "Vlog"
         self.use_vlm = use_vlm
+
         self.vlm_model = vlm_model
         self.auto_approve = auto_approve
         self.api_base = api_base
@@ -619,34 +619,14 @@ Examples:
     if args.gui:
         from tvas.ui import main as ui_main
         
-        # Determine paths for GUI
-        sd_card_path = args.volume  # --volume can specify SD card
-        project_path = None
-        proxy_path = args.proxy_path
-        
-        # If --analysis is provided, use it as project path
-        if args.analysis and args.analysis.exists():
-            project_path = args.analysis
-        
-        # Auto-detect archival path if specified
-        if args.archival_path and args.archival_path.exists():
-            # If project name is specified, use that subdirectory
-            if args.project:
-                project_path = args.archival_path / args.project
-            else:
-                # Find most recent project
-                project_dirs = sorted(
-                    [d for d in args.archival_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
-                    key=lambda x: x.stat().st_mtime,
-                    reverse=True
-                )
-                if project_dirs:
-                    project_path = project_dirs[0]
+        # Resolve paths using shared logic
+        archival_path = detect_archival_root(args.archival_path)
+        project_path = resolve_project_path(archival_path, args.project, args.analysis)
         
         app = ui_main(
-            sd_card_path=sd_card_path,
+            sd_card_path=args.volume,
             project_path=project_path,
-            proxy_path=proxy_path,
+            proxy_path=args.proxy_path,
             model=args.model,
             api_base=api_base,
             api_key=args.api_key,
@@ -761,34 +741,20 @@ Examples:
                 logger.info(f"No SD card found, but archival path exists: {app.archival_path}")
                 logger.info("Checking for previously copied files to process...")
                 
-                # If a project name is specified, look for that specific directory
-                if args.project:
-                    target_project = app.archival_path / args.project
-                    if target_project.exists() and target_project.is_dir():
-                        logger.info(f"Found project directory: {args.project}")
-                        results = app.process_from_archival(target_project, args.project)
-                    else:
-                        logger.error(f"Project directory not found: {target_project}")
-                        logger.error(f"Available projects: {[d.name for d in app.archival_path.iterdir() if d.is_dir() and not d.name.startswith('.')]}")
-                        sys.exit(1)
+                # Resolve project path using shared logic
+                project_path = resolve_project_path(app.archival_path, args.project)
+
+                if project_path and project_path.exists():
+                    logger.info(f"Found project directory: {project_path.name}")
+                    results = app.process_from_archival(project_path, args.project)
                 else:
-                    # Look for the most recent project directory in archival path
-                    project_dirs = sorted(
-                        [d for d in app.archival_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
-                        key=lambda x: x.stat().st_mtime,
-                        reverse=True
-                    )
-                    
-                    if project_dirs:
-                        latest_project = project_dirs[0]
-                        logger.info(f"Found recent project directory: {latest_project.name}")
-                        
-                        # Process from archival path (files already copied)
-                        results = app.process_from_archival(latest_project, args.project)
+                    if args.project:
+                        logger.error(f"Project directory not found: {app.archival_path / args.project}")
                     else:
                         logger.error("No project directories found in archival path")
-                        logger.error("Please insert an SD card or specify --volume")
-                        sys.exit(1)
+                    
+                    logger.error("Please insert an SD card or specify --volume")
+                    sys.exit(1)
                 
                 if results["success"]:
                     logger.info("Processing complete!")

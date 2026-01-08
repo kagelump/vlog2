@@ -23,6 +23,7 @@ from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
 
 from shared import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override, get_openrouter_api_key
+from shared.paths import detect_archival_root, find_latest_project
 from tvas.analysis import ClipAnalysis, analyze_clips_batch
 from tvas.trim import detect_trims_batch
 from tvas.beats import align_beats
@@ -264,14 +265,17 @@ class TvasStatusApp(toga.App):
         # Stage 3: Analysis - needs proxy folder with videos or project folder
         self.analyze_btn.enabled = (has_proxies or has_project) and not running
         
-        # Stage 3.5: Trim Detection - needs analysis JSON files
-        self.trim_btn.enabled = has_analyses and not running
-        
         # Stage 4: Beat Alignment - needs analyses and outline
         self.beats_btn.enabled = has_analyses and has_outline and not running
         
-        # Run All - needs at least project folder
-        self.run_all_btn.enabled = (has_sd or has_project) and not running
+        # Stage 5: Trim Detection - needs analysis JSON files
+        self.trim_btn.enabled = has_analyses and not running
+        
+        # Run Ingestion (1-3) - needs at least project folder or SD card
+        self.run_ingest_btn.enabled = (has_sd or has_project) and not running
+        
+        # Run Post-Processing (4-5) - needs analyses and outline
+        self.run_post_btn.enabled = has_analyses and has_outline and not running
 
     def startup(self):
         """Construct and show the Toga application."""
@@ -285,6 +289,9 @@ class TvasStatusApp(toga.App):
             placeholder="Auto-detect or select SD card...",
             style=Pack(flex=1, margin=(0, 5))
         )
+        if self.sd_card_path:
+            self.sd_input.value = str(self.sd_card_path)
+            
         self.sd_browse_btn = toga.Button("Browse...", on_press=self.select_sd_card, style=Pack(margin=(0, 5)))
         self.sd_detect_btn = toga.Button("Detect", on_press=self.detect_sd_card, style=Pack(margin=(0, 5)))
         
@@ -304,6 +311,10 @@ class TvasStatusApp(toga.App):
             placeholder="Project folder (e.g. /Volumes/Acasis/project_name)...",
             style=Pack(flex=1, margin=(0, 5))
         )
+        if self.project_path:
+            self.project_input.value = str(self.project_path)
+            self.project_name = self.project_path.name
+
         self.project_browse_btn = toga.Button("Browse...", on_press=self.select_project_folder, style=Pack(margin=(0, 5)))
         self.project_detect_btn = toga.Button("Detect", on_press=self.detect_project_folder, style=Pack(margin=(0, 5)))
         
@@ -379,15 +390,15 @@ class TvasStatusApp(toga.App):
             enabled=False,
             style=Pack(margin=5, flex=1)
         )
-        self.trim_btn = toga.Button(
-            "3.5 Trim Detection",
-            on_press=self.run_trim_phase,
-            enabled=False,
-            style=Pack(margin=5, flex=1)
-        )
         self.beats_btn = toga.Button(
             "4. Beat Alignment",
             on_press=self.run_beats_phase,
+            enabled=False,
+            style=Pack(margin=5, flex=1)
+        )
+        self.trim_btn = toga.Button(
+            "5. Trim Detection",
+            on_press=self.run_trim_phase,
             enabled=False,
             style=Pack(margin=5, flex=1)
         )
@@ -397,16 +408,22 @@ class TvasStatusApp(toga.App):
             style=Pack(direction=ROW, margin=5)
         )
         phase_row2 = toga.Box(
-            children=[self.trim_btn, self.beats_btn],
+            children=[self.beats_btn, self.trim_btn],
             style=Pack(direction=ROW, margin=5)
         )
         
         # Run All and Settings
-        self.run_all_btn = toga.Button(
-            "▶ Run All Phases",
-            on_press=self.run_all_phases,
+        self.run_ingest_btn = toga.Button(
+            "▶ Run Ingestion (1-3)",
+            on_press=self.run_ingestion_pipeline,
             enabled=False,
             style=Pack(margin=5, flex=1, color='blue')
+        )
+        self.run_post_btn = toga.Button(
+            "▶ Run Post-Processing (4-5)",
+            on_press=self.run_post_pipeline,
+            enabled=False,
+            style=Pack(margin=5, flex=1, color='purple')
         )
         self.settings_btn = toga.Button(
             "Settings",
@@ -415,7 +432,7 @@ class TvasStatusApp(toga.App):
         )
         
         action_row = toga.Box(
-            children=[self.run_all_btn, self.settings_btn],
+            children=[self.run_ingest_btn, self.run_post_btn, self.settings_btn],
             style=Pack(direction=ROW, margin=5)
         )
         
@@ -531,8 +548,14 @@ class TvasStatusApp(toga.App):
     async def auto_detect_paths(self, app):
         """Auto-detect paths on startup."""
         await asyncio.sleep(0.3)
-        await self.detect_sd_card(None)
-        await self.detect_project_folder(None)
+        
+        # Only auto-detect if not already set (e.g. from CLI args)
+        if not self.sd_card_path:
+            await self.detect_sd_card(None)
+            
+        if not self.project_path:
+            await self.detect_project_folder(None)
+            
         self._update_button_states()
 
     # === PATH SELECTION HANDLERS ===
@@ -593,17 +616,14 @@ class TvasStatusApp(toga.App):
     async def detect_project_folder(self, widget):
         """Auto-detect project folder from Acasis volume."""
         try:
-            acasis_path = Path("/Volumes/Acasis")
-            if acasis_path.exists():
+            acasis_path = await asyncio.get_running_loop().run_in_executor(None, detect_archival_root, None)
+            
+            if acasis_path and acasis_path.exists():
                 # Find most recent project directory
-                project_dirs = sorted(
-                    [d for d in acasis_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
-                    key=lambda x: x.stat().st_mtime,
-                    reverse=True
-                )
+                latest_project = await asyncio.get_running_loop().run_in_executor(None, find_latest_project, acasis_path)
                 
-                if project_dirs:
-                    self.project_path = project_dirs[0]
+                if latest_project:
+                    self.project_path = latest_project
                     self.project_input.value = str(self.project_path)
                     self.project_name = self.project_path.name
                     logger.info(f"Auto-detected project folder: {self.project_path}")
@@ -611,6 +631,8 @@ class TvasStatusApp(toga.App):
                     logger.info("No project folders found on Acasis")
             else:
                 logger.info("Acasis volume not mounted")
+        except Exception as e:
+            logger.error(f"Error detecting project folder: {e}")
                 
             self._update_button_states()
         except Exception as e:
@@ -819,7 +841,7 @@ class TvasStatusApp(toga.App):
             self._set_running(False)
 
     async def run_trim_phase(self, widget):
-        """Run Stage 3.5: Trim Detection."""
+        """Run Stage 5: Trim Detection."""
         proxy_dir = self._get_proxy_dir()
         
         if not proxy_dir.exists():
@@ -827,7 +849,7 @@ class TvasStatusApp(toga.App):
             return
         
         self._set_running(True)
-        self.status_label.text = "Stage 3.5: Detecting trims..."
+        self.status_label.text = "Stage 5: Detecting trims..."
         
         try:
             loop = asyncio.get_running_loop()
@@ -890,8 +912,8 @@ class TvasStatusApp(toga.App):
         finally:
             self._set_running(False)
 
-    async def run_all_phases(self, widget):
-        """Run all applicable phases."""
+    async def run_ingestion_pipeline(self, widget):
+        """Run Ingestion Pipeline (Phase 1-3)."""
         has_sd = self.sd_card_path is not None and self.sd_card_path.exists()
         has_project = self.project_path is not None and self.project_path.exists()
         
@@ -910,22 +932,38 @@ class TvasStatusApp(toga.App):
             
             # Stage 3: Analysis
             await self.run_analysis_phase(widget)
-            self._set_running(True)
             
-            # Stage 3.5: Trim Detection
-            await self.run_trim_phase(widget)
-            self._set_running(True)
-            
-            # Stage 4: Beat Alignment (if outline provided)
-            if self.outline_path and self.outline_path.exists():
-                await self.run_beats_phase(widget)
-            
-            self.status_label.text = "All phases complete!"
-            logger.info("All phases complete!")
+            self.status_label.text = "Ingestion pipeline complete!"
+            logger.info("Ingestion pipeline complete!")
             
         except Exception as e:
-            logger.error(f"Pipeline failed: {e}")
-            self.status_label.text = f"Pipeline failed: {e}"
+            logger.error(f"Ingestion pipeline failed: {e}")
+            self.status_label.text = f"Ingestion pipeline failed: {e}"
+        finally:
+            self._set_running(False)
+
+    async def run_post_pipeline(self, widget):
+        """Run Post-Processing Pipeline (Phase 4-5)."""
+        if not self.outline_path or not self.outline_path.exists():
+            self.main_window.info_dialog("Outline Required", "Beat alignment requires an outline.md file.")
+            return
+
+        self._set_running(True)
+        
+        try:
+            # Stage 4: Beat Alignment
+            await self.run_beats_phase(widget)
+            self._set_running(True)
+            
+            # Stage 5: Trim Detection
+            await self.run_trim_phase(widget)
+            
+            self.status_label.text = "Post-processing pipeline complete!"
+            logger.info("Post-processing pipeline complete!")
+            
+        except Exception as e:
+            logger.error(f"Post-processing pipeline failed: {e}")
+            self.status_label.text = f"Post-processing pipeline failed: {e}"
         finally:
             self._set_running(False)
 
