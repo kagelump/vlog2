@@ -138,7 +138,7 @@ class TVASApp:
         if proxy_dir.exists():
             current_proxies = {p for _, p in clips_to_analyze if p}
             for proxy_file in proxy_dir.glob("*.mp4"):
-                if proxy_file not in current_proxies:
+                if proxy_file not in current_proxies and not proxy_file.name.startswith('.'):
                     logger.info(f"Found existing proxy: {proxy_file.name}")
                     # For existing proxies, we use the proxy path as source if we can't determine the original
                     clips_to_analyze.append((proxy_file, proxy_file))
@@ -296,7 +296,7 @@ class TVASApp:
         for camera_dir in camera_dirs:
             logger.info(f"Scanning {camera_dir.name}...")
             for video_file in camera_dir.iterdir():
-                if video_file.is_file() and video_file.suffix in video_extensions:
+                if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
                     source_files.append(video_file)
         
         if not source_files:
@@ -335,7 +335,7 @@ class TVASApp:
         video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF', '.mts', '.MTS', '.insv', '.INSV', '.insp', '.INSP'}
         
         for video_file in directory.iterdir():
-            if video_file.is_file() and video_file.suffix in video_extensions:
+            if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
                 source_files.append(video_file)
         
         if not source_files:

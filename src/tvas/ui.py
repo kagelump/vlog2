@@ -729,13 +729,13 @@ class TvasStatusApp(toga.App):
                 for subdir in self.project_path.iterdir():
                     if subdir.is_dir() and not subdir.name.startswith('.'):
                         for video_file in subdir.iterdir():
-                            if video_file.is_file() and video_file.suffix in video_extensions:
+                            if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
                                 source_files.append(video_file)
                 
                 if not source_files:
                     # Also check root of project folder
                     for video_file in self.project_path.iterdir():
-                        if video_file.is_file() and video_file.suffix in video_extensions:
+                        if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
                             source_files.append(video_file)
                 
                 if not source_files:
@@ -767,14 +767,15 @@ class TvasStatusApp(toga.App):
         
         if proxy_dir.exists():
             for proxy_file in proxy_dir.glob("*.mp4"):
-                clips_to_analyze.append((proxy_file, proxy_file))
+                if not proxy_file.name.startswith('.'):
+                    clips_to_analyze.append((proxy_file, proxy_file))
         elif self.project_path:
             # Analyze source files directly
             video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF'}
             for subdir in self.project_path.iterdir():
                 if subdir.is_dir() and not subdir.name.startswith('.'):
                     for video_file in subdir.iterdir():
-                        if video_file.is_file() and video_file.suffix in video_extensions:
+                        if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
                             clips_to_analyze.append((video_file, None))
         
         if not clips_to_analyze:

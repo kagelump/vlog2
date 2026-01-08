@@ -188,7 +188,7 @@ def get_video_files(volume_path: Path, camera_type: CameraType) -> list[VideoFil
 
     for ext in extensions:
         for file_path in search_path.rglob(f"*{ext}"):
-            if file_path.is_file():
+            if file_path.is_file() and not file_path.name.startswith('.'):
                 video_files.append(
                     VideoFile(
                         source_path=file_path,
