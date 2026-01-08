@@ -1262,11 +1262,11 @@ class TvasStatusApp(toga.App):
         thumb_box = toga.Box(style=Pack(direction=COLUMN, width=140, margin=5))
         
         # Container for the image area
-        img_container = toga.Box(style=Pack(width=120, height=67, alignment=CENTER))
+        img_container = toga.Box(style=Pack(width=120, height=67, align_items=CENTER))
         thumb_box.add(img_container)
         
         # Start with spinner
-        spinner = toga.ActivityIndicator(style=Pack(padding_top=20))
+        spinner = toga.ActivityIndicator(style=Pack(margin_top=20))
         spinner.start()
         img_container.add(spinner)
 
