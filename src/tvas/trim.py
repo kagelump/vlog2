@@ -54,18 +54,32 @@ def generate_trim_proxy(video_path: Path) -> Path | None:
         )
         
         # We explicitly disable audio (-an) to avoid complexity with audio stream matching
+        # Use h264_videotoolbox on macOS for hardware acceleration (always available)
+        # Fall back to libx264 on other platforms
+        import platform
+        encoder = "h264_videotoolbox" if platform.system() == "Darwin" else "libx264"
+        
         cmd = [
             "ffmpeg", "-y", "-v", "error",
             "-i", str(video_path),
             "-filter_complex", filter_complex,
             "-map", "[outv]",
-            "-c:v", "libx264",
+            "-c:v", encoder,
             "-an", 
             str(output_path)
         ]
         
-        subprocess.run(cmd, capture_output=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, check=True, text=True)
         return output_path
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Failed to generate trim proxy for {video_path}: {e}")
+        if e.stderr:
+            logger.warning(f"FFmpeg stderr: {e.stderr}")
+        if e.stdout:
+            logger.warning(f"FFmpeg stdout: {e.stdout}")
+        if output_path.exists():
+            output_path.unlink()
+        return None
     except Exception as e:
         logger.warning(f"Failed to generate trim proxy for {video_path}: {e}")
         if output_path.exists():
