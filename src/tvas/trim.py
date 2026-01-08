@@ -243,8 +243,13 @@ def detect_trims_batch(
     api_key: Optional[str] = None,
     provider_preferences: Optional[str] = None,
     max_workers: int = 1,
+    progress_callback: Optional[callable] = None,
 ) -> None:
-    """Run trim detection on all analyzed clips in project_dir."""
+    """Run trim detection on all analyzed clips in project_dir.
+    
+    Args:
+        progress_callback: Optional callback(current, total, clip_name) called after each clip.
+    """
     
     json_files = sorted(
         [f for f in project_dir.glob("*.json") if f.name != "analysis.json"],
@@ -277,6 +282,7 @@ def detect_trims_batch(
     )
     
     processed_count = 0
+    total_count = len(json_files)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # If API, we need separate clients? VLMClient is not strictly thread safe if it holds state?
         # Actually VLMClient holds `self.model`.
@@ -285,18 +291,24 @@ def detect_trims_batch(
         # analysis.py used `_get_or_create_vlm_client`.
         # I'll rely on sequential for local, parallel for API.
         
-        futures = []
+        futures = {}
         for json_path in json_files:
             if max_workers > 1 and api_base:
                 # Create new client for each? Or share?
                 # VLMClient with API is thread safe (urllib).
-                futures.append(executor.submit(detect_trim_for_file, json_path, client))
+                futures[executor.submit(detect_trim_for_file, json_path, client)] = json_path
             else:
-                futures.append(executor.submit(detect_trim_for_file, json_path, client))
+                futures[executor.submit(detect_trim_for_file, json_path, client)] = json_path
                 
         for future in as_completed(futures):
+            json_path = futures[future]
             if future.result():
                 processed_count += 1
+            
+            # Report progress
+            completed = len([f for f in futures if f.done()])
+            if progress_callback:
+                progress_callback(completed, total_count, json_path.name)
                 
     logger.info(f"Trim detection complete. Processed {processed_count}/{len(json_files)} eligible clips.")
     

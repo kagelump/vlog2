@@ -971,13 +971,28 @@ class TvasStatusApp(toga.App):
             logger.error("Proxy directory not found")
             return
         
+        # Count clips to process
+        candidate_json_files = [f for f in proxy_dir.glob("*.json") if f.name != "analysis.json"]
+        if not candidate_json_files:
+            logger.error("No clip JSON files found for trim detection")
+            return
+        
         self._set_running(True)
-        self.status_label.text = "Stage 5: Detecting trims..."
+        self.total_count = len(candidate_json_files)
+        self.progress_bar.max = self.total_count
+        self.progress_bar.value = 0
+        self.status_label.text = f"Stage 5: Detecting trims for {self.total_count} clips..."
+        self.analysis_start_time = time.time()
         
         try:
             loop = asyncio.get_running_loop()
             
             def do_trims():
+                def on_progress(current, total, clip_name):
+                    self.main_window.app.loop.call_soon_threadsafe(
+                        self._update_progress, current, total, f"Trim detection: {current}/{total} - {clip_name}"
+                    )
+                
                 detect_trims_batch(
                     project_dir=proxy_dir,
                     model_name=self.model,
@@ -985,6 +1000,7 @@ class TvasStatusApp(toga.App):
                     api_key=self.api_key,
                     provider_preferences=None,
                     max_workers=self.max_workers,
+                    progress_callback=on_progress,
                 )
             
             await loop.run_in_executor(None, do_trims)
@@ -1123,7 +1139,27 @@ class TvasStatusApp(toga.App):
         """Update progress bar and status from any thread."""
         self.progress_bar.max = total
         self.progress_bar.value = current
+        
+        # Calculate ETA if we have a start time
+        if self.analysis_start_time and current > 0:
+            elapsed = time.time() - self.analysis_start_time
+            avg_speed = elapsed / current
+            remaining = total - current
+            eta_seconds = max(0, remaining * avg_speed)
+            
+            if eta_seconds < 60:
+                eta_str = f"{int(eta_seconds)}s"
+            else:
+                eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s"
+            
+            message = f"{message} | ETA: {eta_str}"
+        
         self.status_label.text = message
+        
+        # Update cost display
+        total_cost = CostTracker.get_total()
+        if total_cost > 0:
+            self.cost_label.text = f"💰 ${total_cost:.4f}"
 
     def _extract_thumbnail(self, video_path: Path, timestamp: float = 1.0) -> Optional[bytes]:
         """Extract a thumbnail from a video file."""
