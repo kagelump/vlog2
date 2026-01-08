@@ -455,6 +455,8 @@ def main():
 Examples:
   tvas                      Auto-detect camera SD card and ACASIS archival storage
   tvas --watch              Start watching for SD cards
+  tvas --gui                Launch the status GUI
+  tvas --gui --analysis .   Launch GUI with folder pre-selected
   tvas --volume /Volumes/DJI_POCKET3 --project "Tokyo Day 1"
   tvas --archival-path /Volumes/MySSD --proxy-path ~/Videos
   tvas --analysis .         Analyze video files in the current directory
@@ -466,6 +468,12 @@ Examples:
         "--watch",
         action="store_true",
         help="Watch for SD card insertions",
+    )
+
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the status GUI for visual monitoring",
     )
 
     parser.add_argument(
@@ -606,6 +614,28 @@ Examples:
             args.model = "google/gemini-2.5-flash-lite"
     elif args.lmstudio:
         api_base = "http://localhost:1234/v1"
+
+    # Handle GUI mode
+    if args.gui:
+        from tvas.ui import main as ui_main
+        
+        directory = None
+        if args.analysis:
+            if args.analysis.exists():
+                directory = args.analysis
+            else:
+                logger.error(f"Directory not found: {args.analysis}")
+                sys.exit(1)
+        
+        app = ui_main(
+            directory=directory,
+            model=args.model,
+            api_base=api_base,
+            api_key=args.api_key,
+            max_workers=args.workers,
+        )
+        app.main_loop()
+        sys.exit(0)
 
     # Handle Beat Alignment
     if args.beats:
