@@ -13,6 +13,7 @@ import io
 import gc
 import time
 import json
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Callable
@@ -25,6 +26,7 @@ from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
 from shared import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override, get_openrouter_api_key
 from shared.vlm_client import CostTracker
 from shared.paths import detect_archival_root, find_latest_project
+from shared.ffmpeg_utils import extract_thumbnail
 from tvas.analysis import ClipAnalysis, analyze_clips_batch
 from tvas.trim import detect_trims_batch
 from tvas.beats import align_beats
@@ -1192,13 +1194,61 @@ class TvasStatusApp(toga.App):
             
         self.clip_label.text = "Resuming live view..."
 
+    def _load_thumbnail_background(self, analysis: ClipAnalysis, container: toga.Box, spinner: toga.ActivityIndicator):
+        """Background task to load/generate thumbnail."""
+        try:
+            # Determine cache path
+            cache_dir = Path.home() / ".tvas" / "thumbnails"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create a unique filename based on path hash
+            path_hash = hashlib.md5(str(analysis.source_path).encode()).hexdigest()
+            thumb_path = cache_dir / f"{path_hash}.jpg"
+            
+            video_path = analysis.proxy_path or analysis.source_path
+            
+            success = False
+            if thumb_path.exists():
+                success = True
+            elif video_path and video_path.exists():
+                # Extract if not exists
+                timestamp = analysis.thumbnail_timestamp_sec or 1.0
+                success = extract_thumbnail(video_path, thumb_path, timestamp)
+            
+            def update_ui():
+                try:
+                    # Remove spinner
+                    if spinner in container.children:
+                        container.remove(spinner)
+                    
+                    if success:
+                        # Create and add image view
+                        image_view = toga.ImageView(
+                            image=toga.Image(thumb_path),
+                            style=Pack(width=120, height=67) # ~16:9
+                        )
+                        container.add(image_view)
+                    else:
+                        # Fallback showing error or placeholder
+                        lbl = toga.Label("No Preview", style=Pack(width=120, height=67, text_align=CENTER))
+                        container.add(lbl)
+                except Exception as e:
+                    logger.error(f"Failed to update thumbnail UI: {e}")
+
+            self.loop.call_soon_threadsafe(update_ui)
+                
+        except Exception as e:
+            logger.error(f"Error loading thumbnail: {e}")
+            # Ensure spinner is removed on error
+            def clean_error():
+                if spinner in container.children:
+                    container.remove(spinner)
+                lbl = toga.Label("Error", style=Pack(width=120, height=67, text_align=CENTER))
+                container.add(lbl)
+            self.loop.call_soon_threadsafe(clean_error)
+
     def add_recent_clip(self, analysis: ClipAnalysis):
-        """Add a thumbnail to the recent clips strip.
-        
-        Note: Thumbnail extraction is skipped during rapid updates to avoid
-        blocking the main thread and causing GC-related crashes when UI widgets
-        are finalized from background threads.
-        """
+        """Add a thumbnail to the recent clips strip."""
         # Limit the number of recent clips to prevent unbounded UI widget growth
         # Remove oldest clips if we have too many (widgets must be removed on main thread)
         max_recent = 20
@@ -1211,12 +1261,20 @@ class TvasStatusApp(toga.App):
         
         thumb_box = toga.Box(style=Pack(direction=COLUMN, width=140, margin=5))
         
-        # Create a simple placeholder button instead of extracting thumbnails
-        # This avoids blocking the main thread with ffmpeg calls during rapid updates
+        # Container for the image area
+        img_container = toga.Box(style=Pack(width=120, height=67, alignment=CENTER))
+        thumb_box.add(img_container)
+        
+        # Start with spinner
+        spinner = toga.ActivityIndicator(style=Pack(padding_top=20))
+        spinner.start()
+        img_container.add(spinner)
+
+        # Add a small Details button below
         view_btn = toga.Button(
-            "View", 
+            "Details", 
             on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
-            style=Pack(height=80, width=120)
+            style=Pack(height=28, width=120, font_size=10, margin_top=2)
         )
         thumb_box.add(view_btn)
         
@@ -1233,6 +1291,13 @@ class TvasStatusApp(toga.App):
         
         # Store reference to prevent premature GC
         self.recent_clips.append(analysis)
+        
+        # Start background loading
+        threading.Thread(
+            target=self._load_thumbnail_background, 
+            args=(analysis, img_container, spinner),
+            daemon=True
+        ).start()
 
 
 def main(

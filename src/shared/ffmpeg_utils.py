@@ -72,3 +72,29 @@ def check_ffmpeg_available() -> bool:
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
+
+
+def extract_thumbnail(video_path: Path, output_path: Path, timestamp: float = 1.0) -> bool:
+    """Extract a thumbnail from a video file."""
+    try:
+        # Create parent directory if it doesn't exist
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(timestamp),
+            "-i", str(video_path),
+            "-vframes", "1", "-q:v", "2",
+            "-vf", "scale=320:-1",
+            str(output_path)
+        ]
+        
+        # Don't check=True to handle potential ffmpeg warnings/errors gracefully
+        result = subprocess.run(cmd, capture_output=True, timeout=10)
+        
+        if result.returncode != 0:
+            logger.warning(f"ffmpeg returned {result.returncode} for {video_path}")
+            
+        return output_path.exists()
+    except Exception as e:
+        logger.error(f"Failed to extract thumbnail: {e}")
+        return False
