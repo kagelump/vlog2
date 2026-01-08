@@ -713,33 +713,44 @@ Examples:
                 logger.info(f"No SD card found, but archival path exists: {app.archival_path}")
                 logger.info("Checking for previously copied files to process...")
                 
-                # Look for the most recent project directory in archival path
-                project_dirs = sorted(
-                    [d for d in app.archival_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
-                    key=lambda x: x.stat().st_mtime,
-                    reverse=True
-                )
-                
-                if project_dirs:
-                    latest_project = project_dirs[0]
-                    logger.info(f"Found recent project directory: {latest_project.name}")
-                    
-                    # Process from archival path (files already copied)
-                    results = app.process_from_archival(latest_project, args.project)
-                    
-                    if results["success"]:
-                        logger.info("Processing complete!")
-                        logger.info(f"Files processed: {results['files_processed']}")
-                        logger.info(f"Clips analyzed: {results['clips_analyzed']}")
-                        logger.info(f"Timeline: {results['timeline_path']}")
+                # If a project name is specified, look for that specific directory
+                if args.project:
+                    target_project = app.archival_path / args.project
+                    if target_project.exists() and target_project.is_dir():
+                        logger.info(f"Found project directory: {args.project}")
+                        results = app.process_from_archival(target_project, args.project)
                     else:
-                        logger.error("Processing failed:")
-                        for error in results["errors"]:
-                            logger.error(f"  - {error}")
+                        logger.error(f"Project directory not found: {target_project}")
+                        logger.error(f"Available projects: {[d.name for d in app.archival_path.iterdir() if d.is_dir() and not d.name.startswith('.')]}")
                         sys.exit(1)
                 else:
-                    logger.error("No project directories found in archival path")
-                    logger.error("Please insert an SD card or specify --volume")
+                    # Look for the most recent project directory in archival path
+                    project_dirs = sorted(
+                        [d for d in app.archival_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
+                        key=lambda x: x.stat().st_mtime,
+                        reverse=True
+                    )
+                    
+                    if project_dirs:
+                        latest_project = project_dirs[0]
+                        logger.info(f"Found recent project directory: {latest_project.name}")
+                        
+                        # Process from archival path (files already copied)
+                        results = app.process_from_archival(latest_project, args.project)
+                    else:
+                        logger.error("No project directories found in archival path")
+                        logger.error("Please insert an SD card or specify --volume")
+                        sys.exit(1)
+                
+                if results["success"]:
+                    logger.info("Processing complete!")
+                    logger.info(f"Files processed: {results['files_processed']}")
+                    logger.info(f"Clips analyzed: {results['clips_analyzed']}")
+                    logger.info(f"Timeline: {results['timeline_path']}")
+                else:
+                    logger.error("Processing failed:")
+                    for error in results["errors"]:
+                        logger.error(f"  - {error}")
                     sys.exit(1)
             else:
                 logger.error("No camera volumes found and no archival path available")
