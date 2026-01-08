@@ -80,7 +80,7 @@ class SettingsWindow(toga.Window):
 
         # Prompts
         self.prompt_inputs = {}
-        prompt_files = ["video_describe.txt", "video_trim.txt"]
+        prompt_files = ["video_describe.txt", "video_trim.txt", "beat_alignment.txt"]
         
         prompt_container = toga.OptionContainer(style=Pack(flex=1))
         
