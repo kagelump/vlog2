@@ -82,12 +82,11 @@ def build_edit_proxy_command(
     source_path: Path,
     output_path: Path,
 ) -> list[str]:
-    """Build FFmpeg command for edit proxy generation (ProRes Proxy).
+    """Build FFmpeg command for edit proxy generation (h264).
 
     Edit Proxy specs:
-    - Format: ProRes Proxy (422 Proxy)
+    - Format: h264
     - Resolution: Maintains original
-    - For smooth scrubbing in DaVinci Resolve
 
     Args:
         source_path: Path to source video.
@@ -109,6 +108,8 @@ def build_edit_proxy_command(
         "-allow_sw", "1",
         "-c:a", "copy",
         "-map_metadata", "0",
+        "-map_metadata:s:v", "0:s:v",
+        "-map_metadata:s:a", "0:s:a",
         "-movflags", "use_metadata_tags",
         str(output_path),
     ]
