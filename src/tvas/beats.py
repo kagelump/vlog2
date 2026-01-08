@@ -40,8 +40,13 @@ def align_beats(
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
     provider_preferences: Optional[str] = None,
+    progress_callback: Optional[callable] = None,
 ) -> None:
-    """Align clips in project_dir to beats in outline_path."""
+    """Align clips in project_dir to beats in outline_path.
+    
+    Args:
+        progress_callback: Optional callback(current, total, clip_name) called after each clip.
+    """
     
     if not outline_path.exists():
         logger.error(f"Outline file not found: {outline_path}")
@@ -88,6 +93,8 @@ def align_beats(
         if "beat" in current_data:
             logger.info(f"Skipping {json_path.name} (already has beat)")
             previous_clip_data = current_data
+            if progress_callback:
+                progress_callback(i + 1, len(json_with_metadata), json_path.name)
             continue
 
         logger.info(f"Aligning beat for {json_path.name} ({i+1}/{len(json_with_metadata)})...")
@@ -158,6 +165,7 @@ def align_beats(
                     text = text.split("```json")[1].split("```")[0].strip()
                 elif "```" in text:
                     text = text.split("```")[1].split("```")[0].strip()
+                text = text.replace(r'\_', '_')  # Unescape underscores
                 
                 try:
                     beat_data = json.loads(text)
@@ -165,7 +173,7 @@ def align_beats(
                     save_json(json_path, current_data)
                     logger.info(f"Assigned {json_path.name} to {beat_data.get('beat_id')}")
                 except json.JSONDecodeError:
-                    logger.error(f"Failed to parse JSON response for {json_path.name}: {response.text}")
+                    logger.error(f"Failed to parse JSON response for {json_path.name}: {text}")
             else:
                 logger.error(f"No response from VLM for {json_path.name}")
                 
@@ -173,6 +181,10 @@ def align_beats(
             logger.error(f"Error processing {json_path.name}: {e}")
 
         previous_clip_data = current_data
+        
+        # Report progress
+        if progress_callback:
+            progress_callback(i + 1, len(json_with_metadata), json_path.name)
 
     logger.info("Beat alignment complete.")
     

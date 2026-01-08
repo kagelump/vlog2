@@ -1014,13 +1014,28 @@ class TvasStatusApp(toga.App):
             logger.error("Outline file required for beat alignment")
             return
         
+        # Count clips to process
+        candidate_json_files = [f for f in proxy_dir.glob("*.json") if f.name != "analysis.json"]
+        if not candidate_json_files:
+            logger.error("No clip JSON files found to align")
+            return
+        
         self._set_running(True)
-        self.status_label.text = "Stage 4: Aligning to beats..."
+        self.total_count = len(candidate_json_files)
+        self.progress_bar.max = self.total_count
+        self.progress_bar.value = 0
+        self.status_label.text = f"Stage 4: Aligning {self.total_count} clips to beats..."
+        self.analysis_start_time = time.time()
         
         try:
             loop = asyncio.get_running_loop()
             
             def do_beats():
+                def on_progress(current, total, clip_name):
+                    self.main_window.app.loop.call_soon_threadsafe(
+                        self._update_progress, current, total, f"Beat alignment: {current}/{total} - {clip_name}"
+                    )
+                
                 align_beats(
                     project_dir=proxy_dir,
                     outline_path=self.outline_path,
@@ -1028,6 +1043,7 @@ class TvasStatusApp(toga.App):
                     api_base=self.api_base,
                     api_key=self.api_key,
                     provider_preferences=None,
+                    progress_callback=on_progress,
                 )
             
             await loop.run_in_executor(None, do_beats)
@@ -1036,6 +1052,7 @@ class TvasStatusApp(toga.App):
             total_cost = CostTracker.get_total()
             cost_msg = f" | Cost: ${total_cost:.4f}" if total_cost > 0 else ""
             
+            self.progress_bar.value = self.total_count
             logger.info(f"Beat alignment complete{cost_msg}")
             self.status_label.text = f"Beat alignment complete{cost_msg}"
             
