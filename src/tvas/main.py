@@ -619,16 +619,34 @@ Examples:
     if args.gui:
         from tvas.ui import main as ui_main
         
-        directory = None
-        if args.analysis:
-            if args.analysis.exists():
-                directory = args.analysis
+        # Determine paths for GUI
+        sd_card_path = args.volume  # --volume can specify SD card
+        project_path = None
+        proxy_path = args.proxy_path
+        
+        # If --analysis is provided, use it as project path
+        if args.analysis and args.analysis.exists():
+            project_path = args.analysis
+        
+        # Auto-detect archival path if specified
+        if args.archival_path and args.archival_path.exists():
+            # If project name is specified, use that subdirectory
+            if args.project:
+                project_path = args.archival_path / args.project
             else:
-                logger.error(f"Directory not found: {args.analysis}")
-                sys.exit(1)
+                # Find most recent project
+                project_dirs = sorted(
+                    [d for d in args.archival_path.iterdir() if d.is_dir() and not d.name.startswith('.')],
+                    key=lambda x: x.stat().st_mtime,
+                    reverse=True
+                )
+                if project_dirs:
+                    project_path = project_dirs[0]
         
         app = ui_main(
-            directory=directory,
+            sd_card_path=sd_card_path,
+            project_path=project_path,
+            proxy_path=proxy_path,
             model=args.model,
             api_base=api_base,
             api_key=args.api_key,
