@@ -48,6 +48,9 @@ or you simply prefer faster processing, you can use a cloud provider.
 - **Wait I can use ChatGPT for this?**
   Yeah but even GPT 5 mini is like [4x more expensive](https://openrouter.ai/openai/gpt-5-mini) than Qwen3-VL.  Regular ChatGPT is [20x more expensive](https://openrouter.ai/openai/gpt-5.2-chat).
 
+- **Why does TPRS use LM Studio instead of MLX-VLM?**
+  mlx-vlm has issues with numbers which screws up bounding boxes.  This doesn't seem to happen in LM Studio (or in most providers on OpenRouter).
+
 ## Features
 
 ### TVAS (Travel Vlog Automation System)
