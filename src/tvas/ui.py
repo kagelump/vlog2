@@ -656,22 +656,18 @@ class TvasStatusApp(toga.App):
     
     async def select_sd_card(self, widget):
         """Select SD card folder manually."""
-        try:
-            folder = await self.main_window.dialog(toga.SelectFolderDialog(title="Select SD card volume"))
-            if folder:
-                self.sd_card_path = Path(folder)
-                self.sd_input.value = str(self.sd_card_path)
-                
-                # Detect camera type
-                if is_camera_volume(self.sd_card_path):
-                    camera_type = detect_camera_type(self.sd_card_path)
-                    logger.info(f"Selected SD card: {self.sd_card_path} ({camera_type.value})")
-                else:
-                    logger.warning(f"Selected folder doesn't appear to be a camera volume")
-                
-                self._update_button_states()
-        except Exception as e:
-            logger.error(f"Error selecting SD card: {e}")
+        def validate_sd_card(path: Path) -> tuple[bool, str]:
+            if is_camera_volume(path):
+                camera_type = detect_camera_type(path)
+                return True, f"Valid camera volume ({camera_type.value})"
+            return False, "Selected folder doesn't appear to be a camera volume"
+        
+        await self._select_path(
+            "Select SD card volume",
+            "sd_card_path",
+            self.sd_input,
+            validation_fn=validate_sd_card
+        )
 
     async def detect_sd_card(self, widget):
         """Auto-detect camera SD cards."""
@@ -696,16 +692,11 @@ class TvasStatusApp(toga.App):
 
     async def select_project_folder(self, widget):
         """Select project folder manually."""
-        try:
-            folder = await self.main_window.dialog(toga.SelectFolderDialog(title="Select project folder"))
-            if folder:
-                self.project_path = Path(folder)
-                self.project_input.value = str(self.project_path)
-                self.project_name = self.project_path.name
-                logger.info(f"Selected project folder: {self.project_path}")
-                self._update_button_states()
-        except Exception as e:
-            logger.error(f"Error selecting project folder: {e}")
+        await self._select_path(
+            "Select project folder",
+            "project_path",
+            self.project_input
+        )
 
     async def detect_project_folder(self, widget):
         """Auto-detect project folder from Acasis volume."""
@@ -734,30 +725,20 @@ class TvasStatusApp(toga.App):
 
     async def select_proxy_folder(self, widget):
         """Select proxy folder manually."""
-        try:
-            folder = await self.main_window.dialog(toga.SelectFolderDialog(title="Select proxy folder"))
-            if folder:
-                self.proxy_path = Path(folder)
-                self.proxy_input.value = str(self.proxy_path)
-                logger.info(f"Selected proxy folder: {self.proxy_path}")
-                self._update_button_states()
-        except Exception as e:
-            logger.error(f"Error selecting proxy folder: {e}")
+        await self._select_path(
+            "Select proxy folder",
+            "proxy_path",
+            self.proxy_input
+        )
 
     async def select_outline_file(self, widget):
         """Select outline file for beat alignment."""
-        try:
-            file = await self.main_window.dialog(toga.OpenFileDialog(
-                title="Select outline file",
-                file_types=["md", "txt"]
-            ))
-            if file:
-                self.outline_path = Path(file)
-                self.outline_input.value = str(self.outline_path)
-                logger.info(f"Selected outline file: {self.outline_path}")
-                self._update_button_states()
-        except Exception as e:
-            logger.error(f"Error selecting outline file: {e}")
+        await self._select_path(
+            "Select outline file",
+            "outline_path",
+            self.outline_input,
+            is_file=True
+        )
 
     # === SETTINGS ===
     
@@ -796,6 +777,104 @@ class TvasStatusApp(toga.App):
         """Get the proxy directory path."""
         project_name = self._get_project_name()
         return self.proxy_path / project_name / "proxy"
+
+    async def _select_path(
+        self,
+        dialog_title: str,
+        path_attr: str,
+        input_widget: toga.TextInput,
+        is_file: bool = False,
+        validation_fn: Optional[Callable[[Path], tuple[bool, str]]] = None
+    ):
+        """Generic path selection handler.
+        
+        Args:
+            dialog_title: Title for the selection dialog
+            path_attr: Name of the attribute to set (e.g., 'sd_card_path')
+            input_widget: Text input widget to update
+            is_file: True for file selection, False for folder
+            validation_fn: Optional function that takes Path and returns (is_valid, message)
+        """
+        try:
+            if is_file:
+                result = await self.main_window.dialog(toga.OpenFileDialog(
+                    title=dialog_title,
+                    file_types=["md", "txt"]
+                ))
+            else:
+                result = await self.main_window.dialog(toga.SelectFolderDialog(title=dialog_title))
+            
+            if result:
+                path = Path(result)
+                
+                # Run validation if provided
+                if validation_fn:
+                    is_valid, message = validation_fn(path)
+                    if not is_valid:
+                        logger.warning(message)
+                
+                setattr(self, path_attr, path)
+                input_widget.value = str(path)
+                
+                # Special handling for project_path
+                if path_attr == 'project_path':
+                    self.project_name = path.name
+                
+                logger.info(f"Selected {path_attr.replace('_', ' ')}: {path}")
+                self._update_button_states()
+        except Exception as e:
+            logger.error(f"Error selecting {path_attr.replace('_', ' ')}: {e}")
+
+    async def _run_phase_wrapper(
+        self,
+        phase_name: str,
+        required_paths: dict[str, Optional[Path]],
+        work_fn: Callable,
+        total_items: Optional[int] = None
+    ):
+        """Generic wrapper for running pipeline phases.
+        
+        Args:
+            phase_name: Display name of the phase
+            required_paths: Dict of path descriptions to Path objects that must exist
+            work_fn: Synchronous function to execute in background
+            total_items: Optional count for progress tracking
+        """
+        # Validate required paths
+        for desc, path in required_paths.items():
+            if not path or not path.exists():
+                logger.error(f"{desc} required for {phase_name}")
+                return
+        
+        self._set_running(True)
+        self.status_label.text = f"{phase_name}..."
+        
+        if total_items:
+            self.total_count = total_items
+            self.progress_bar.max = total_items
+            self.progress_bar.value = 0
+            self.analysis_start_time = time.time()
+        
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, work_fn)
+            
+            # Display cumulative cost if available
+            total_cost = CostTracker.get_total()
+            cost_msg = f" | Cost: ${total_cost:.4f}" if total_cost > 0 else ""
+            
+            success_msg = f"{phase_name} complete{cost_msg}"
+            logger.info(success_msg)
+            self.status_label.text = success_msg
+            
+            return result
+        except Exception as e:
+            error_msg = f"{phase_name} failed: {e}"
+            logger.error(error_msg)
+            self.status_label.text = error_msg
+            raise
+        finally:
+            self._set_running(False)
 
     async def run_copy_phase(self, widget):
         """Run Stage 1: Copy from SD card."""
@@ -967,116 +1046,67 @@ class TvasStatusApp(toga.App):
         """Run Stage 5: Trim Detection."""
         proxy_dir = self._get_proxy_dir()
         
-        if not proxy_dir.exists():
-            logger.error("Proxy directory not found")
-            return
-        
         # Count clips to process
-        candidate_json_files = [f for f in proxy_dir.glob("*.json") if f.name != "analysis.json"]
+        candidate_json_files = [f for f in proxy_dir.glob("*.json") if f.name != "analysis.json"] if proxy_dir.exists() else []
         if not candidate_json_files:
             logger.error("No clip JSON files found for trim detection")
             return
         
-        self._set_running(True)
-        self.total_count = len(candidate_json_files)
-        self.progress_bar.max = self.total_count
-        self.progress_bar.value = 0
-        self.status_label.text = f"Stage 5: Detecting trims for {self.total_count} clips..."
-        self.analysis_start_time = time.time()
-        
-        try:
-            loop = asyncio.get_running_loop()
-            
-            def do_trims():
-                def on_progress(current, total, clip_name):
-                    self.main_window.app.loop.call_soon_threadsafe(
-                        self._update_progress, current, total, f"Trim detection: {current}/{total} - {clip_name}"
-                    )
-                
-                detect_trims_batch(
-                    project_dir=proxy_dir,
-                    model_name=self.model,
-                    api_base=self.api_base,
-                    api_key=self.api_key,
-                    provider_preferences=None,
-                    max_workers=self.max_workers,
-                    progress_callback=on_progress,
+        def do_trims():
+            def on_progress(current, total, clip_name):
+                self.main_window.app.loop.call_soon_threadsafe(
+                    self._update_progress, current, total, f"Trim detection: {current}/{total} - {clip_name}"
                 )
             
-            await loop.run_in_executor(None, do_trims)
-            
-            # Display cumulative cost
-            total_cost = CostTracker.get_total()
-            cost_msg = f" | Cost: ${total_cost:.4f}" if total_cost > 0 else ""
-            
-            logger.info(f"Trim detection complete{cost_msg}")
-            self.status_label.text = f"Trim detection complete{cost_msg}"
-            
-        except Exception as e:
-            logger.error(f"Trim detection failed: {e}")
-            self.status_label.text = f"Trim detection failed: {e}"
-        finally:
-            self._set_running(False)
+            detect_trims_batch(
+                project_dir=proxy_dir,
+                model_name=self.model,
+                api_base=self.api_base,
+                api_key=self.api_key,
+                provider_preferences=None,
+                max_workers=self.max_workers,
+                progress_callback=on_progress,
+            )
+        
+        await self._run_phase_wrapper(
+            "Stage 5: Trim Detection",
+            {"Proxy directory": proxy_dir},
+            do_trims,
+            total_items=len(candidate_json_files)
+        )
 
     async def run_beats_phase(self, widget):
         """Run Stage 4: Beat Alignment."""
         proxy_dir = self._get_proxy_dir()
         
-        if not proxy_dir.exists():
-            logger.error("Proxy directory not found")
-            return
-        
-        if not self.outline_path or not self.outline_path.exists():
-            logger.error("Outline file required for beat alignment")
-            return
-        
         # Count clips to process
-        candidate_json_files = [f for f in proxy_dir.glob("*.json") if f.name != "analysis.json"]
+        candidate_json_files = [f for f in proxy_dir.glob("*.json") if f.name != "analysis.json"] if proxy_dir.exists() else []
         if not candidate_json_files:
             logger.error("No clip JSON files found to align")
             return
         
-        self._set_running(True)
-        self.total_count = len(candidate_json_files)
-        self.progress_bar.max = self.total_count
-        self.progress_bar.value = 0
-        self.status_label.text = f"Stage 4: Aligning {self.total_count} clips to beats..."
-        self.analysis_start_time = time.time()
-        
-        try:
-            loop = asyncio.get_running_loop()
-            
-            def do_beats():
-                def on_progress(current, total, clip_name):
-                    self.main_window.app.loop.call_soon_threadsafe(
-                        self._update_progress, current, total, f"Beat alignment: {current}/{total} - {clip_name}"
-                    )
-                
-                align_beats(
-                    project_dir=proxy_dir,
-                    outline_path=self.outline_path,
-                    model_name=self.model,
-                    api_base=self.api_base,
-                    api_key=self.api_key,
-                    provider_preferences=None,
-                    progress_callback=on_progress,
+        def do_beats():
+            def on_progress(current, total, clip_name):
+                self.main_window.app.loop.call_soon_threadsafe(
+                    self._update_progress, current, total, f"Beat alignment: {current}/{total} - {clip_name}"
                 )
             
-            await loop.run_in_executor(None, do_beats)
-            
-            # Display cumulative cost
-            total_cost = CostTracker.get_total()
-            cost_msg = f" | Cost: ${total_cost:.4f}" if total_cost > 0 else ""
-            
-            self.progress_bar.value = self.total_count
-            logger.info(f"Beat alignment complete{cost_msg}")
-            self.status_label.text = f"Beat alignment complete{cost_msg}"
-            
-        except Exception as e:
-            logger.error(f"Beat alignment failed: {e}")
-            self.status_label.text = f"Beat alignment failed: {e}"
-        finally:
-            self._set_running(False)
+            align_beats(
+                project_dir=proxy_dir,
+                outline_path=self.outline_path,
+                model_name=self.model,
+                api_base=self.api_base,
+                api_key=self.api_key,
+                provider_preferences=None,
+                progress_callback=on_progress,
+            )
+        
+        await self._run_phase_wrapper(
+            "Stage 4: Beat Alignment",
+            {"Proxy directory": proxy_dir, "Outline file": self.outline_path},
+            do_beats,
+            total_items=len(candidate_json_files)
+        )
 
     async def run_ingestion_pipeline(self, widget):
         """Run Ingestion Pipeline (Phase 1-3)."""
