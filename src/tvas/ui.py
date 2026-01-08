@@ -34,6 +34,52 @@ from tvas.ingestion import CameraType, detect_camera_type, ingest_volume, get_vi
 from tvas.watcher import find_camera_volumes, is_camera_volume
 from shared.proxy import generate_proxies_batch
 
+# === STYLE CONSTANTS ===
+# Customize these constants to adjust the UI appearance throughout the application
+STYLES = {
+    # Button styles
+    'button_phase': Pack(margin=(2, 3), height=24),
+    'button_phase_bold': Pack(margin=(2, 3), height=24, font_weight='bold'),
+    'button_settings': Pack(margin=(2, 3), height=24),
+    'button_small': Pack(height=28, width=120, font_size=10, margin_top=2),
+    'button_action': Pack(margin=(0, 5)),
+    
+    # Layout styles
+    'layout_column': Pack(direction=COLUMN),
+    'layout_row': Pack(direction=ROW),
+    'layout_column_flex': Pack(direction=COLUMN, flex=1),
+    'layout_row_flex': Pack(direction=ROW, flex=1),
+    'layout_column_margin': Pack(direction=COLUMN, margin=5),
+    'layout_row_margin': Pack(direction=ROW, margin=5),
+    'layout_row_section': Pack(direction=ROW, margin=5),
+    'layout_column_section': Pack(direction=COLUMN, margin=5, flex=1),
+    
+    # Label styles
+    'label_section_title': Pack(font_weight='bold', margin=(10, 10, 5, 10)),
+    'label_subsection': Pack(font_weight='bold', margin=(5, 5)),
+    'label_text': Pack(margin=5),
+    'label_text_centered': Pack(margin=5, text_align=CENTER),
+    'label_text_monospace': Pack(margin=(0, 10), font_family="monospace", font_size=10, flex=1),
+    
+    # Input styles
+    'input_text': Pack(flex=1, margin=(0, 5)),
+    'input_readonly': Pack(flex=1, margin=(0, 5)),
+    
+    # Container styles
+    'container_details': Pack(direction=COLUMN, width=350, margin=10),
+    'container_main': Pack(direction=ROW, flex=1, margin=10),
+    'container_footer': Pack(direction=COLUMN),
+    'container_recent': Pack(direction=ROW, margin=10),
+    'container_clip_thumb': Pack(direction=COLUMN, width=140, margin=5),
+    'container_clip_image': Pack(width=120, height=67, align_items=CENTER),
+    
+    # Progress styles
+    'progress_bar': Pack(margin=(0, 10), flex=1),
+    
+    # Divider styles
+    'divider': Pack(height=1, background_color='#CCCCCC', margin=(10, 5)),
+}
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -286,99 +332,114 @@ class TvasStatusApp(toga.App):
         """Construct and show the Toga application."""
         
         # === PHASE BUTTONS SECTION (LEFT SIDE) ===
-        phase_section_label = toga.Label("Pipeline Phases", style=Pack(font_weight='bold', margin=(10, 10, 5, 10)))
+        phase_section_label = toga.Label("Pipeline Phases", style=STYLES['label_section_title'])
         
         # Individual phase buttons
         self.copy_btn = toga.Button(
             "1. Copy from SD",
             on_press=self.run_copy_phase,
             enabled=False,
-            style=Pack(margin=(2, 5), height=32)
+            style=STYLES['button_phase']
         )
         self.proxy_btn = toga.Button(
             "2. Generate Proxies",
             on_press=self.run_proxy_phase,
             enabled=False,
-            style=Pack(margin=(2, 5), height=32)
+            style=STYLES['button_phase']
         )
         self.analyze_btn = toga.Button(
             "3. AI Analysis",
             on_press=self.run_analysis_phase,
             enabled=False,
-            style=Pack(margin=(2, 5), height=32)
+            style=STYLES['button_phase']
         )
         self.beats_btn = toga.Button(
             "4. Beat Alignment",
             on_press=self.run_beats_phase,
             enabled=False,
-            style=Pack(margin=(2, 5), height=32)
+            style=STYLES['button_phase']
         )
         self.trim_btn = toga.Button(
             "5. Trim Detection",
             on_press=self.run_trim_phase,
             enabled=False,
-            style=Pack(margin=(2, 5), height=32)
+            style=STYLES['button_phase']
         )
         
         # Divider line
-        divider1 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
+        divider1 = toga.Box(style=STYLES['divider'])
         
         # Run pipeline buttons - more prominent
         self.run_ingest_btn = toga.Button(
             "▶ Run Ingestion (1-3)",
             on_press=self.run_ingestion_pipeline,
             enabled=False,
-            style=Pack(margin=(2, 5), height=36, font_weight='bold')
+            style=STYLES['button_phase_bold']
         )
         self.run_post_btn = toga.Button(
-            "▶ Run Post-Processing (4-5)",
+            "▶ Run Post (4-5)",
             on_press=self.run_post_pipeline,
             enabled=False,
-            style=Pack(margin=(2, 5), height=36, font_weight='bold')
+            style=STYLES['button_phase_bold']
         )
-        
-        # Divider line
-        divider2 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
         
         # Settings button
         self.settings_btn = toga.Button(
             "Settings",
             on_press=self.open_settings,
-            style=Pack(margin=(2, 5), height=32)
+            style=STYLES['button_settings']
         )
         
-        phase_box = toga.Box(
+        # Column 1: Individual Manual Phases
+        phase_col1 = toga.Box(
             children=[
-                phase_section_label,
+                toga.Label("Manual Steps", style=STYLES['label_subsection']),
                 self.copy_btn,
                 self.proxy_btn,
                 self.analyze_btn,
                 self.beats_btn,
                 self.trim_btn,
-                divider1,
+            ],
+            style=STYLES['layout_column_flex']
+        )
+
+        # Column 2: Automation Pipelines & Settings
+        phase_col2 = toga.Box(
+            children=[
+                toga.Label("Automation", style=STYLES['label_subsection']),
                 self.run_ingest_btn,
                 self.run_post_btn,
-                divider2,
                 toga.Box(style=Pack(flex=1)),  # Spacer
                 self.settings_btn
             ],
-            style=Pack(direction=COLUMN, margin=5, width=180)
+            style=Pack(direction=COLUMN, flex=1, margin_left=10)  # margin_left not in STYLES dict
+        )
+
+        phase_box = toga.Box(
+            children=[
+                phase_section_label,
+                toga.Box(
+                    children=[phase_col1, phase_col2],
+                    style=Pack(direction=ROW)
+                )
+            ],
+            style=Pack(direction=COLUMN, margin=5, width=400)
         )
         
         # === PATH SELECTION SECTION (RIGHT SIDE) ===
-        path_section_label = toga.Label("Paths", style=Pack(font_weight='bold', margin=(10, 10, 5, 10)))
+        path_section_label = toga.Label("Paths", style=STYLES['label_section_title'])
         
         # SD Card Volume
         self.sd_input = toga.TextInput(
             readonly=True,
             placeholder="Auto-detect or select SD card...",
-            style=Pack(flex=1, margin=(0, 5))
+            style=STYLES['input_readonly']
         )
         if self.sd_card_path:
             self.sd_input.value = str(self.sd_card_path)
             
-        self.sd_browse_btn = toga.Button("Browse...", on_press=self.select_sd_card, style=Pack(margin=(0, 5)))
-        self.sd_detect_btn = toga.Button("Detect", on_press=self.detect_sd_card, style=Pack(margin=(0, 5)))
+        self.sd_browse_btn = toga.Button("Browse...", on_press=self.select_sd_card, style=STYLES['button_action'])
+        self.sd_detect_btn = toga.Button("Detect", on_press=self.detect_sd_card, style=STYLES['button_action'])
         
         sd_row = toga.Box(
             children=[
@@ -387,21 +448,21 @@ class TvasStatusApp(toga.App):
                 self.sd_browse_btn,
                 self.sd_detect_btn,
             ],
-            style=Pack(direction=ROW, margin=5)
+            style=STYLES['layout_row_section']
         )
         
         # Project Folder (archival storage)
         self.project_input = toga.TextInput(
             readonly=True,
             placeholder="Project folder (e.g. /Volumes/Acasis/project_name)...",
-            style=Pack(flex=1, margin=(0, 5))
+            style=STYLES['input_readonly']
         )
         if self.project_path:
             self.project_input.value = str(self.project_path)
             self.project_name = self.project_path.name
 
-        self.project_browse_btn = toga.Button("Browse...", on_press=self.select_project_folder, style=Pack(margin=(0, 5)))
-        self.project_detect_btn = toga.Button("Detect", on_press=self.detect_project_folder, style=Pack(margin=(0, 5)))
+        self.project_browse_btn = toga.Button("Browse...", on_press=self.select_project_folder, style=STYLES['button_action'])
+        self.project_detect_btn = toga.Button("Detect", on_press=self.detect_project_folder, style=STYLES['button_action'])
         
         project_row = toga.Box(
             children=[
@@ -410,18 +471,18 @@ class TvasStatusApp(toga.App):
                 self.project_browse_btn,
                 self.project_detect_btn,
             ],
-            style=Pack(direction=ROW, margin=5)
+            style=STYLES['layout_row_section']
         )
         
         # Proxy Folder
         self.proxy_input = toga.TextInput(
             readonly=True,
             placeholder="Proxy folder (default: ~/Movies/Vlog)...",
-            style=Pack(flex=1, margin=(0, 5))
+            style=STYLES['input_readonly']
         )
         if self.proxy_path:
             self.proxy_input.value = str(self.proxy_path)
-        self.proxy_browse_btn = toga.Button("Browse...", on_press=self.select_proxy_folder, style=Pack(margin=(0, 5)))
+        self.proxy_browse_btn = toga.Button("Browse...", on_press=self.select_proxy_folder, style=STYLES['button_action'])
         # Spacer button to align with rows that have two buttons
         proxy_spacer = toga.Box(style=Pack(width=65, margin=(0, 5)))
         
@@ -432,16 +493,16 @@ class TvasStatusApp(toga.App):
                 self.proxy_browse_btn,
                 proxy_spacer,
             ],
-            style=Pack(direction=ROW, margin=5)
+            style=STYLES['layout_row_section']
         )
         
         # Outline file (for beat alignment)
         self.outline_input = toga.TextInput(
             readonly=True,
             placeholder="Optional: outline.md for beat alignment...",
-            style=Pack(flex=1, margin=(0, 5))
+            style=STYLES['input_readonly']
         )
-        self.outline_browse_btn = toga.Button("Browse...", on_press=self.select_outline_file, style=Pack(margin=(0, 5)))
+        self.outline_browse_btn = toga.Button("Browse...", on_press=self.select_outline_file, style=STYLES['button_action'])
         # Spacer to align with rows that have two buttons
         outline_spacer = toga.Box(style=Pack(width=65, margin=(0, 5)))
         
@@ -452,22 +513,22 @@ class TvasStatusApp(toga.App):
                 self.outline_browse_btn,
                 outline_spacer,
             ],
-            style=Pack(direction=ROW, margin=5)
+            style=STYLES['layout_row_section']
         )
         
         path_box = toga.Box(
             children=[path_section_label, sd_row, project_row, proxy_row, outline_row],
-            style=Pack(direction=COLUMN, margin=5, flex=1)
+            style=STYLES['layout_column_section']
         )
         
         # Combine phase buttons and paths horizontally
         top_section = toga.Box(
             children=[phase_box, path_box],
-            style=Pack(direction=ROW, margin=5)
+            style=STYLES['layout_row_section']
         )
         
         # === PROGRESS SECTION ===
-        self.progress_bar = toga.ProgressBar(max=100, value=0, style=Pack(margin=(0, 10), flex=1))
+        self.progress_bar = toga.ProgressBar(max=100, value=0, style=STYLES['progress_bar'])
         
         self.mode_label = toga.Label("", style=Pack(margin=(5, 5), font_weight='bold'))
         self.update_mode_label()
@@ -477,12 +538,12 @@ class TvasStatusApp(toga.App):
         
         status_row = toga.Box(
             children=[self.mode_label, self.status_label, self.cost_label],
-            style=Pack(direction=ROW)
+            style=STYLES['layout_row']
         )
 
         self.log_label = toga.Label(
             "Configure paths and click a phase button to start", 
-            style=Pack(margin=(0, 10), font_family="monospace", font_size=10, flex=1)
+            style=STYLES['label_text_monospace']
         )
         
         self.stop_button = toga.Button(
@@ -496,7 +557,7 @@ class TvasStatusApp(toga.App):
             "Resume Live View",
             on_press=self.resume_live_view,
             enabled=False,
-            style=Pack(margin=(0, 5))
+            style=STYLES['button_action']
         )
 
         log_row = toga.Box(
@@ -511,11 +572,11 @@ class TvasStatusApp(toga.App):
 
         # === MAIN CONTENT: Clip View & Details ===
         self.image_view = toga.ImageView(style=Pack(flex=1))
-        self.clip_label = toga.Label("No clip loaded", style=Pack(margin=5, text_align=CENTER))
+        self.clip_label = toga.Label("No clip loaded", style=STYLES['label_text_centered'])
         
         self.image_area = toga.Box(
             children=[self.image_view, self.clip_label],
-            style=Pack(direction=COLUMN, flex=1)
+            style=STYLES['layout_column_flex']
         )
 
         # Details Panel
@@ -525,17 +586,17 @@ class TvasStatusApp(toga.App):
         
         self.details_panel = toga.Box(
             children=[self.details_label, self.details_content, self.preview_btn],
-            style=Pack(direction=COLUMN, width=350, margin=10)
+            style=STYLES['container_details']
         )
         
         main_box = toga.Box(
             children=[self.image_area],
-            style=Pack(direction=ROW, flex=1, margin=10)
+            style=STYLES['container_main']
         )
         self.main_box = main_box
 
         # === FOOTER: Recent Clips ===
-        self.recent_box = toga.Box(style=Pack(direction=ROW, margin=10))
+        self.recent_box = toga.Box(style=STYLES['container_recent'])
         
         self.recent_scroll = toga.ScrollContainer(
             horizontal=True,
@@ -1277,10 +1338,10 @@ class TvasStatusApp(toga.App):
             except Exception:
                 break
         
-        thumb_box = toga.Box(style=Pack(direction=COLUMN, width=140, margin=5))
+        thumb_box = toga.Box(style=STYLES['container_clip_thumb'])
         
         # Container for the image area
-        img_container = toga.Box(style=Pack(width=120, height=67, align_items=CENTER))
+        img_container = toga.Box(style=STYLES['container_clip_image'])
         thumb_box.add(img_container)
         
         # Start with spinner
@@ -1292,7 +1353,7 @@ class TvasStatusApp(toga.App):
         view_btn = toga.Button(
             "Details", 
             on_press=functools.partial(lambda a, w: self.show_details(a), analysis),
-            style=Pack(height=28, width=120, font_size=10, margin_top=2)
+            style=STYLES['button_small']
         )
         thumb_box.add(view_btn)
         
