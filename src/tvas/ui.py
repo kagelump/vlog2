@@ -281,7 +281,76 @@ class TvasStatusApp(toga.App):
     def startup(self):
         """Construct and show the Toga application."""
         
-        # === PATH SELECTION SECTION ===
+        # === PHASE BUTTONS SECTION (LEFT SIDE) ===
+        phase_section_label = toga.Label("Pipeline Phases", style=Pack(font_weight='bold', margin=(10, 10, 5, 10)))
+        
+        self.copy_btn = toga.Button(
+            "1. Copy from SD",
+            on_press=self.run_copy_phase,
+            enabled=False,
+            style=Pack(margin=5)
+        )
+        self.proxy_btn = toga.Button(
+            "2. Generate Proxies",
+            on_press=self.run_proxy_phase,
+            enabled=False,
+            style=Pack(margin=5)
+        )
+        self.analyze_btn = toga.Button(
+            "3. AI Analysis",
+            on_press=self.run_analysis_phase,
+            enabled=False,
+            style=Pack(margin=5)
+        )
+        self.beats_btn = toga.Button(
+            "4. Beat Alignment",
+            on_press=self.run_beats_phase,
+            enabled=False,
+            style=Pack(margin=5)
+        )
+        self.trim_btn = toga.Button(
+            "5. Trim Detection",
+            on_press=self.run_trim_phase,
+            enabled=False,
+            style=Pack(margin=5)
+        )
+        
+        # Run All and Settings
+        self.run_ingest_btn = toga.Button(
+            "▶ Run Ingestion (1-3)",
+            on_press=self.run_ingestion_pipeline,
+            enabled=False,
+            style=Pack(margin=5, color='blue')
+        )
+        self.run_post_btn = toga.Button(
+            "▶ Run Post-Processing (4-5)",
+            on_press=self.run_post_pipeline,
+            enabled=False,
+            style=Pack(margin=5, color='purple')
+        )
+        self.settings_btn = toga.Button(
+            "Settings",
+            on_press=self.open_settings,
+            style=Pack(margin=5)
+        )
+        
+        phase_box = toga.Box(
+            children=[
+                phase_section_label,
+                self.copy_btn,
+                self.proxy_btn,
+                self.analyze_btn,
+                self.beats_btn,
+                self.trim_btn,
+                toga.Box(style=Pack(flex=1)),  # Spacer
+                self.run_ingest_btn,
+                self.run_post_btn,
+                self.settings_btn
+            ],
+            style=Pack(direction=COLUMN, margin=5, width=200)
+        )
+        
+        # === PATH SELECTION SECTION (RIGHT SIDE) ===
         path_section_label = toga.Label("Paths", style=Pack(font_weight='bold', margin=(10, 10, 5, 10)))
         
         # SD Card Volume
@@ -367,79 +436,13 @@ class TvasStatusApp(toga.App):
         
         path_box = toga.Box(
             children=[path_section_label, sd_row, project_row, proxy_row, outline_row],
-            style=Pack(direction=COLUMN, margin=5)
+            style=Pack(direction=COLUMN, margin=5, flex=1)
         )
         
-        # === PHASE BUTTONS SECTION ===
-        phase_section_label = toga.Label("Pipeline Phases", style=Pack(font_weight='bold', margin=(10, 10, 5, 10)))
-        
-        self.copy_btn = toga.Button(
-            "1. Copy from SD",
-            on_press=self.run_copy_phase,
-            enabled=False,
-            style=Pack(margin=5, flex=1)
-        )
-        self.proxy_btn = toga.Button(
-            "2. Generate Proxies",
-            on_press=self.run_proxy_phase,
-            enabled=False,
-            style=Pack(margin=5, flex=1)
-        )
-        self.analyze_btn = toga.Button(
-            "3. AI Analysis",
-            on_press=self.run_analysis_phase,
-            enabled=False,
-            style=Pack(margin=5, flex=1)
-        )
-        self.beats_btn = toga.Button(
-            "4. Beat Alignment",
-            on_press=self.run_beats_phase,
-            enabled=False,
-            style=Pack(margin=5, flex=1)
-        )
-        self.trim_btn = toga.Button(
-            "5. Trim Detection",
-            on_press=self.run_trim_phase,
-            enabled=False,
-            style=Pack(margin=5, flex=1)
-        )
-        
-        phase_row1 = toga.Box(
-            children=[self.copy_btn, self.proxy_btn, self.analyze_btn],
+        # Combine phase buttons and paths horizontally
+        top_section = toga.Box(
+            children=[phase_box, path_box],
             style=Pack(direction=ROW, margin=5)
-        )
-        phase_row2 = toga.Box(
-            children=[self.beats_btn, self.trim_btn],
-            style=Pack(direction=ROW, margin=5)
-        )
-        
-        # Run All and Settings
-        self.run_ingest_btn = toga.Button(
-            "▶ Run Ingestion (1-3)",
-            on_press=self.run_ingestion_pipeline,
-            enabled=False,
-            style=Pack(margin=5, flex=1, color='blue')
-        )
-        self.run_post_btn = toga.Button(
-            "▶ Run Post-Processing (4-5)",
-            on_press=self.run_post_pipeline,
-            enabled=False,
-            style=Pack(margin=5, flex=1, color='purple')
-        )
-        self.settings_btn = toga.Button(
-            "Settings",
-            on_press=self.open_settings,
-            style=Pack(margin=5)
-        )
-        
-        action_row = toga.Box(
-            children=[self.run_ingest_btn, self.run_post_btn, self.settings_btn],
-            style=Pack(direction=ROW, margin=5)
-        )
-        
-        phase_box = toga.Box(
-            children=[phase_section_label, phase_row1, phase_row2, action_row],
-            style=Pack(direction=COLUMN, margin=5)
         )
         
         # === PROGRESS SECTION ===
@@ -521,7 +524,7 @@ class TvasStatusApp(toga.App):
         # === MAIN LAYOUT ===
         self.main_window = toga.MainWindow(title=self.formal_name, size=(1200, 900))
         self.main_window.content = toga.Box(
-            children=[path_box, phase_box, progress_box, main_box, footer_container],
+            children=[top_section, progress_box, main_box, footer_container],
             style=Pack(direction=COLUMN)
         )
         
