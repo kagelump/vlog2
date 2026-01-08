@@ -454,7 +454,7 @@ class TvasStatusApp(toga.App):
         # Project Folder (archival storage)
         self.project_input = toga.TextInput(
             readonly=True,
-            placeholder="Project folder (e.g. /Volumes/Acasis/project_name)...",
+            placeholder="Archival folder (e.g. /Volumes/Acasis/project_name)...",
             style=STYLES['input_readonly']
         )
         if self.project_path:
@@ -466,7 +466,7 @@ class TvasStatusApp(toga.App):
         
         project_row = toga.Box(
             children=[
-                toga.Label("Project:", style=Pack(margin=(5, 5), width=100)),
+                toga.Label("Archival:", style=Pack(margin=(5, 5), width=100)),
                 self.project_input,
                 self.project_browse_btn,
                 self.project_detect_btn,
