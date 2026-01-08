@@ -233,6 +233,7 @@ def generate_proxies_batch(
     source_files: list[Path],
     output_dir: Path,
     max_workers: int = 4,
+    progress_callback: Any = None,
 ) -> list[ProxyResult]:
     """Generate edit proxy videos for a batch of files with parallel processing.
 
@@ -240,11 +241,14 @@ def generate_proxies_batch(
         source_files: List of source video paths.
         output_dir: Directory for output proxies.
         max_workers: Maximum number of concurrent encoding jobs (default: 3).
+        progress_callback: Optional callback(current, total, result).
 
     Returns:
         List of ProxyResult for each file.
     """
     results: list[ProxyResult] = []
+    total_files = len(source_files)
+    completed_count = 0
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all jobs
@@ -256,18 +260,24 @@ def generate_proxies_batch(
         # Collect results as they complete
         for future in as_completed(future_to_source):
             source_path = future_to_source[future]
+            completed_count += 1
             try:
                 result = future.result()
                 results.append(result)
+                if progress_callback:
+                    progress_callback(completed_count, total_files, result)
             except Exception as e:
                 logger.error(f"Unexpected error processing {source_path.name}: {e}")
-                results.append(ProxyResult(
+                error_result = ProxyResult(
                     source_path=source_path,
                     proxy_path=None,
                     success=False,
                     duration_seconds=0.0,
                     error_message=str(e),
-                ))
+                )
+                results.append(error_result)
+                if progress_callback:
+                    progress_callback(completed_count, total_files, error_result)
 
     successful = sum(1 for r in results if r.success)
     logger.info(f"Proxy generation complete: {successful}/{len(results)} successful")

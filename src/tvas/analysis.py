@@ -586,6 +586,7 @@ def analyze_clips_batch(
     api_key: Optional[str] = None,
     provider_preferences: Optional[str] = None,
     max_workers: int = 1,
+    progress_callback: Optional[Any] = None,
 ) -> list[ClipAnalysis]:
     """Analyze a batch of video clips.
 
@@ -597,9 +598,7 @@ def analyze_clips_batch(
         api_key: Optional API key.
         provider_preferences: Optional provider preferences.
         max_workers: Number of parallel workers (default 1 for sequential).
-                     For local models: 1-2 recommended (GPU contention).
-                     For API-based models: 4-8 recommended for throughput.
-                     Automatically clamped to max 16 workers.
+        progress_callback: Optional callback(current, total, result).
 
     Returns:
         List of ClipAnalysis results.
@@ -630,6 +629,8 @@ def analyze_clips_batch(
                 is_parallel=False,
             )
             results.append(result)
+            if progress_callback:
+                progress_callback(i + 1, len(clips), result)
     else:
         logger.info(f"Starting parallel analysis with {max_workers} workers on {len(clips)} clips")
         results_map = {}
@@ -659,6 +660,8 @@ def analyze_clips_batch(
                 try:
                     result = future.result()
                     results_map[index] = result
+                    if progress_callback:
+                        progress_callback(completed_count, len(clips), result)
                     logger.debug(f"Finished clip {index + 1}/{len(clips)}: {source_path.name}")
                 except Exception as e:
                     logger.error(f"Clip {index + 1}/{len(clips)} ({source_path.name}) failed: {e}")
@@ -666,7 +669,7 @@ def analyze_clips_batch(
                     stat_info = source_path.stat()
                     created_ts = stat_info.st_birthtime if hasattr(stat_info, 'st_birthtime') else stat_info.st_ctime
                     modified_ts = stat_info.st_mtime
-                    results_map[index] = ClipAnalysis(
+                    failed_result = ClipAnalysis(
                         source_path=source_path,
                         proxy_path=proxy_path,
                         duration_seconds=0,
@@ -674,6 +677,9 @@ def analyze_clips_batch(
                         created_timestamp=datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
                         modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
                     )
+                    results_map[index] = failed_result
+                    if progress_callback:
+                        progress_callback(completed_count, len(clips), failed_result)
                 
                 if completed_count % max(1, len(clips) // 10) == 0 or completed_count == len(clips):
                     logger.info(f"Progress: {completed_count}/{len(clips)} clips analyzed")

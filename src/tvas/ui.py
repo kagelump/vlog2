@@ -708,7 +708,7 @@ class TvasStatusApp(toga.App):
                 project_name = self._get_project_name()
                 
                 def progress_cb(name, i, total):
-                    self.loop.call_soon_threadsafe(
+                    self.main_window.app.loop.call_soon_threadsafe(
                         self._update_progress, i, total, f"Copying {i}/{total}: {name}"
                     )
                 
@@ -766,7 +766,17 @@ class TvasStatusApp(toga.App):
                 proxy_dir = self._get_proxy_dir()
                 logger.info(f"Generating proxies for {len(source_files)} files to {proxy_dir}")
                 
-                results = generate_proxies_batch(source_files, proxy_dir)
+                def on_progress(current, total, result):
+                    msg = f"Proxies: {current}/{total} - {result.source_path.name}"
+                    self.main_window.app.loop.call_soon_threadsafe(
+                        self._update_progress, current, total, msg
+                    )
+                
+                results = generate_proxies_batch(
+                    source_files, 
+                    proxy_dir,
+                    progress_callback=on_progress
+                )
                 successful = [r for r in results if r.success]
                 return len(successful), len(results)
             
@@ -814,6 +824,11 @@ class TvasStatusApp(toga.App):
             loop = asyncio.get_running_loop()
             
             def do_analysis():
+                def on_progress(current, total, result):
+                    self.main_window.app.loop.call_soon_threadsafe(
+                        self.update_ui, current, total, result
+                    )
+                
                 analyses = analyze_clips_batch(
                     clips_to_analyze,
                     use_vlm=True,
@@ -822,14 +837,11 @@ class TvasStatusApp(toga.App):
                     api_key=self.api_key,
                     provider_preferences=None,
                     max_workers=self.max_workers,
+                    progress_callback=on_progress
                 )
                 return analyses
             
             analyses = await loop.run_in_executor(None, do_analysis)
-            
-            # Update UI with results
-            for i, analysis in enumerate(analyses):
-                self.update_ui(i + 1, len(analyses), analysis)
             
             logger.info(f"Analysis complete: {len(analyses)} clips")
             self.status_label.text = f"Analysis complete: {len(analyses)} clips"
