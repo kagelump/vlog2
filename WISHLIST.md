@@ -1,7 +1,7 @@
 # For TVAS
 
-## "Best Moment" Detection:
-Currently, the app detects start/end junk. Improve this by asking the AI to return the timestamp of the "most aesthetic 3-5 second window" in the clip. This allows for an "Insta-cut" mode where it aggressively trims to the best moments.
+## Timestamp adjustment window
+A lot of the time since this involves a lot of international travel, timestamp and timezones are all wonky.  There should be a window/flow after doing SD card copy -> Archival (or into proxy) that can make fixes and adjustments to timestamps so that they are all consistent.
 
 ## Music Sync / Rhythm:
 The user mentioned "create beats". The current implementation implies "Story Beats" (narrative sections). It lacks musical beat alignment.
