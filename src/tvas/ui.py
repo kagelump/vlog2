@@ -374,30 +374,56 @@ class OutlineGeneratorWindow(toga.Window):
                 with open(analysis_json_path, 'r') as f:
                     analysis_data = json.load(f)
                 
+                # Handle both list and dict formats
+                clips = analysis_data if isinstance(analysis_data, list) else analysis_data.get('clips', [])
+                
                 # Format clip summaries
                 clip_summaries = []
-                for clip in analysis_data.get('clips', []):
+                for clip in clips:
+                    metadata = clip.get('metadata', {})
                     summary = f"Clip: {clip.get('clip_name', 'Unknown')}\n"
-                    summary += f"Duration: {clip.get('duration_seconds', 0):.1f}s\n"
+                    
+                    # Metadata
+                    if metadata.get('created_timestamp'):
+                        summary += f"Timestamp: {metadata['created_timestamp']}\n"
+                    if metadata.get('duration'):
+                        summary += f"Duration: {metadata['duration']}s\n"
+                    elif clip.get('duration_seconds'):
+                        summary += f"Duration: {clip['duration_seconds']:.1f}s\n"
+                    
+                    # Context
+                    if clip.get('time_of_day'):
+                        summary += f"Time: {clip['time_of_day']}\n"
+                    if clip.get('environment'):
+                        summary += f"Environment: {clip['environment']}\n"
+                    if clip.get('people_presence'):
+                        summary += f"People: {clip['people_presence']}\n"
+                    if clip.get('landmark_identification'):
+                        summary += f"Landmarks: {clip['landmark_identification']}\n"
+                    if clip.get('detected_text'):
+                        summary += f"Text: {clip['detected_text']}\n"
+                    if clip.get('mood'):
+                        summary += f"Mood: {clip['mood']}\n"
+                    
+                    # Descriptions
                     if clip.get('clip_description'):
                         summary += f"Description: {clip['clip_description']}\n"
+                    if clip.get('audio_description'):
+                        summary += f"Audio: {clip['audio_description']}\n"
+                    
+                    # Keywords
                     if clip.get('subject_keywords'):
                         summary += f"Subjects: {', '.join(clip['subject_keywords'])}\n"
                     if clip.get('action_keywords'):
                         summary += f"Actions: {', '.join(clip['action_keywords'])}\n"
+                        
                     clip_summaries.append(summary)
                 
                 footage_list = "\n---\n".join(clip_summaries)
                 
-                # Construct prompt
-                system_prompt = (
-                    "You are an expert video editing assistant helping edit a vlog. "
-                    "Help organize the footage by thinking of story beats, and then aligning each clip to a beat. "
-                    "You are provided a plan as well as a list of footage that has been AI described.\n\n"
-                    "Create an outline.md file with the following structure:\n"
-                    "# Beat Title\nBrief description of this story beat\n\n"
-                    "Repeat for each beat. Be specific and creative based on the available footage."
-                )
+                # Load system prompt from file
+                from shared import load_prompt
+                system_prompt = load_prompt("outline_generation.txt")
                 
                 user_prompt = f"""# Vlog Plan
 {plan_text}
@@ -414,6 +440,8 @@ Please create a story beats outline that organizes this footage according to the
                 # If a separator was somehow selected, use default
                 if selected_model.startswith("━━━"):
                     selected_model = "google/gemini-2.5-flash-lite"
+                
+                logging.info(f"Generating outline prompt: {user_prompt}")
                 
                 response = call_vlm(
                     prompt=user_prompt,

@@ -83,6 +83,40 @@ def check_lmstudio_running():
 
     return False
 
+def call_vlm(
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    model_name: str = "google/gemini-2.5-flash-lite",
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+    images: Optional[list[Path]] = None,
+    provider_preferences: Optional[str] = None,
+) -> str:
+    """Wrapper function to call VLM API or local model."""
+    client = VLMClient(
+        model_name=model_name,
+        api_base=api_base,
+        api_key=api_key,
+        provider_preferences=provider_preferences
+    )
+    
+    full_prompt = prompt
+    if system_prompt:
+        # Some models support system prompt better as part of user prompt
+        # especially the free/cheap ones, so we prepend it
+        full_prompt = f"{system_prompt}\n\n{prompt}"
+    
+    response = client.generate(
+        prompt=full_prompt,
+        image_paths=images or [],
+        max_tokens=3000,
+    )
+    
+    if response:
+        return response.text
+    else:
+        raise RuntimeError("Failed to get response from VLM")
+
 class VLMClient:
     """Client for interacting with Vision Language Models (local or API)."""
 
