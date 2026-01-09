@@ -20,11 +20,12 @@ from typing import Any
 
 from shared import DEFAULT_VLM_MODEL, get_openrouter_api_key
 from shared.paths import detect_archival_root, resolve_project_path
+from shared.proxy import generate_proxies_batch
+from shared.vlm_client import check_lmstudio_running
 from tvas.analysis import analyze_clips_batch
 from tvas.beats import align_beats
-from tvas.trim import detect_trims_batch
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume
-from shared.proxy import generate_proxies_batch
+from tvas.trim import detect_trims_batch
 from tvas.watcher import VolumeWatcher, check_watchdog_available, find_camera_volumes, is_camera_volume
 
 # Configure logging
@@ -611,6 +612,7 @@ Examples:
         if not args.model or args.model == DEFAULT_VLM_MODEL:
             args.model = "google/gemini-2.5-flash-lite"
     elif args.lmstudio:
+        check_lmstudio_running()
         api_base = "http://localhost:1234/v1"
 
     # Handle GUI mode (default)

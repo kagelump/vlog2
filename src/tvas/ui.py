@@ -24,7 +24,7 @@ from toga.style import Pack
 from toga.style.pack import COLUMN, ROW, LEFT, RIGHT, CENTER
 
 from shared import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override, get_openrouter_api_key
-from shared.vlm_client import CostTracker
+from shared.vlm_client import CostTracker, fetch_available_models
 from shared.paths import detect_archival_root, find_latest_project
 from shared.ffmpeg_utils import extract_thumbnail
 from tvas.analysis import ClipAnalysis, analyze_clips_batch
@@ -238,6 +238,11 @@ class OutlineGeneratorWindow(toga.Window):
             style=Pack(flex=1, margin=(0, 10))
         )
         
+        if self.app_instance.api_base == "http://localhost:1234/v1":
+            # LM Studio mode, fetch available models from local API
+            self.model_select.items = ["Loading models..."]
+            self.app_instance.loop.run_in_executor(None, self._update_models_from_api)
+        
         # Load existing files if they exist
         plan_content = ""
         if self.plan_path.exists():
@@ -325,6 +330,22 @@ class OutlineGeneratorWindow(toga.Window):
             style=Pack(direction=COLUMN)
         )
     
+    def _update_models_from_api(self):
+        """Fetch models from API and update UI."""
+        models = fetch_available_models(self.app_instance.api_base)
+        
+        def update_ui():
+            if models:
+                self.model_select.items = models
+                if self.app_instance.model in models:
+                    self.model_select.value = self.app_instance.model
+                elif models:
+                    self.model_select.value = models[0]
+            else:
+                 self.model_select.items = [self.app_instance.model or "local-model"]
+        
+        self.app_instance.loop.call_soon_threadsafe(update_ui)
+
     def save_files(self, widget):
         """Save both plan and outline files."""
         try:
@@ -450,7 +471,8 @@ Please create a story beats outline that organizes this footage according to the
                     api_base=self.app_instance.api_base,
                     api_key=self.app_instance.api_key,
                     images=[],
-                    provider_preferences=None
+                    provider_preferences=None,
+                    max_tokens=6000,
                 )
                 
                 return response

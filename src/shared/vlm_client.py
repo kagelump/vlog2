@@ -83,6 +83,25 @@ def check_lmstudio_running():
 
     return False
 
+def fetch_available_models(api_base: str) -> List[str]:
+    """Fetch available models from an OpenAI-compatible API endpoint."""
+    if not api_base:
+        return []
+        
+    try:
+        url = f"{api_base.rstrip('/')}/models"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=2) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            # Standard OpenAI format: {"data": [{"id": "model-id", ...}, ...]}
+            if "data" in data and isinstance(data["data"], list):
+                models = [m["id"] for m in data["data"] if "id" in m]
+                return sorted(models)
+            return []
+    except Exception as e:
+        logger.warning(f"Failed to fetch models from {api_base}: {e}")
+        return []
+
 def call_vlm(
     prompt: str,
     system_prompt: Optional[str] = None,
@@ -91,6 +110,7 @@ def call_vlm(
     api_key: Optional[str] = None,
     images: Optional[list[Path]] = None,
     provider_preferences: Optional[str] = None,
+    max_tokens: int = 3000
 ) -> str:
     """Wrapper function to call VLM API or local model."""
     client = VLMClient(
@@ -109,7 +129,7 @@ def call_vlm(
     response = client.generate(
         prompt=full_prompt,
         image_paths=images or [],
-        max_tokens=3000,
+        max_tokens=max_tokens,
     )
     
     if response:
