@@ -14,7 +14,7 @@ import gc
 import time
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -33,6 +33,7 @@ from tvas.trim import detect_trims_batch
 from tvas.beats import align_beats
 from tvas.ingestion import CameraType, detect_camera_type, ingest_volume, get_video_files
 from tvas.watcher import find_camera_volumes, is_camera_volume
+from tvas.tools.timestamp_fixer import TimeShiftEngine, ClipInfo
 from shared.proxy import generate_proxies_batch
 
 # === STYLE CONSTANTS ===
@@ -502,6 +503,818 @@ class ClipPreviewWindow(toga.Window):
         self.content = scroll_container
 
 
+# Camera colors for timeline visualization
+CAMERA_COLORS = [
+    "#4285F4",  # Blue (Google Blue)
+    "#EA4335",  # Red (Google Red)
+    "#34A853",  # Green (Google Green)
+    "#FBBC05",  # Yellow (Google Yellow)
+    "#9C27B0",  # Purple
+    "#00BCD4",  # Cyan
+    "#FF5722",  # Deep Orange
+    "#607D8B",  # Blue Grey
+]
+
+
+class TimestampFixerWindow(toga.Window):
+    """Window for inspecting and correcting video timestamps across cameras."""
+    
+    def __init__(self, app_instance):
+        super().__init__(title="Timestamp Alignment", size=(1400, 900))
+        self.app_instance = app_instance
+        self.engine = TimeShiftEngine()
+        self.selected_clips: set[Path] = set()
+        self.camera_visibility: dict[str, bool] = {}
+        self.camera_colors: dict[str, str] = {}
+        self.clip_widgets: dict[Path, toga.Box] = {}
+        self.sync_point_a: Optional[ClipInfo] = None
+        self.sync_point_b: Optional[ClipInfo] = None
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize the timestamp fixer UI."""
+        
+        # === LEFT PANEL: Sources ===
+        sources_label = toga.Label("Camera Sources", style=Pack(font_weight='bold', margin=5))
+        
+        self.camera_list_box = toga.Box(style=Pack(direction=COLUMN, flex=1))
+        
+        camera_scroll = toga.ScrollContainer(
+            vertical=True,
+            horizontal=False,
+            style=Pack(flex=1)
+        )
+        camera_scroll.content = self.camera_list_box
+        
+        # Source action buttons
+        self.select_all_btn = toga.Button(
+            "Select All", 
+            on_press=self.select_all_clips,
+            style=Pack(margin=2, flex=1)
+        )
+        self.deselect_all_btn = toga.Button(
+            "Deselect All",
+            on_press=self.deselect_all_clips, 
+            style=Pack(margin=2, flex=1)
+        )
+        
+        select_btns = toga.Box(
+            children=[self.select_all_btn, self.deselect_all_btn],
+            style=Pack(direction=ROW, margin=5)
+        )
+        
+        self.detect_anomalies_btn = toga.Button(
+            "🔍 Detect Anomalies",
+            on_press=self.run_detect_anomalies,
+            style=Pack(margin=5)
+        )
+        
+        self.select_anomalies_btn = toga.Button(
+            "Select Anomalies",
+            on_press=self.select_anomalies,
+            style=Pack(margin=5)
+        )
+        
+        left_panel = toga.Box(
+            children=[
+                sources_label,
+                camera_scroll,
+                select_btns,
+                self.detect_anomalies_btn,
+                self.select_anomalies_btn,
+            ],
+            style=Pack(direction=COLUMN, width=200, margin=5)
+        )
+        
+        # === CENTER PANEL: Timeline ===
+        timeline_label = toga.Label("Timeline", style=Pack(font_weight='bold', margin=5))
+        
+        self.timeline_box = toga.Box(style=Pack(direction=COLUMN, flex=1))
+        
+        self.timeline_scroll = toga.ScrollContainer(
+            vertical=True,
+            horizontal=False,
+            style=Pack(flex=1)
+        )
+        self.timeline_scroll.content = self.timeline_box
+        
+        center_panel = toga.Box(
+            children=[timeline_label, self.timeline_scroll],
+            style=Pack(direction=COLUMN, flex=1, margin=5)
+        )
+        
+        # === RIGHT PANEL: Tools ===
+        tools_label = toga.Label("Tools", style=Pack(font_weight='bold', margin=5))
+        
+        # Selection info
+        self.selection_info = toga.Label(
+            "No clips selected",
+            style=Pack(margin=5, font_size=11)
+        )
+        
+        # Divider
+        divider1 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
+        
+        # Quick select section
+        quick_select_label = toga.Label("Quick Select", style=Pack(font_weight='bold', margin=(10, 5)))
+        
+        self.camera_select = toga.Selection(
+            items=["(Select camera)"],
+            style=Pack(margin=5, flex=1)
+        )
+        self.select_camera_btn = toga.Button(
+            "Select All from Camera",
+            on_press=self.select_camera_clips,
+            style=Pack(margin=5)
+        )
+        
+        quick_select_box = toga.Box(
+            children=[self.camera_select, self.select_camera_btn],
+            style=Pack(direction=COLUMN, margin=5)
+        )
+        
+        # Divider
+        divider2 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
+        
+        # Shift operation section
+        shift_label = toga.Label("Time Shift", style=Pack(font_weight='bold', margin=(10, 5)))
+        
+        self.shift_input = toga.TextInput(
+            placeholder="+01:00:00 or -00:30:00",
+            style=Pack(margin=5, flex=1)
+        )
+        
+        self.apply_shift_btn = toga.Button(
+            "Apply Shift to Selected",
+            on_press=self.apply_shift,
+            style=Pack(margin=5)
+        )
+        
+        shift_box = toga.Box(
+            children=[
+                toga.Label("Offset (±HH:MM:SS):", style=Pack(margin=5)),
+                self.shift_input,
+                self.apply_shift_btn,
+            ],
+            style=Pack(direction=COLUMN, margin=5)
+        )
+        
+        # Timezone conversion
+        self.tz_label = toga.Label("Timezone Convert", style=Pack(font_weight='bold', margin=(10, 5)))
+        
+        self.tz_options = [
+            "UTC-12", "UTC-11", "UTC-10", "UTC-9", "UTC-8 (PST)", 
+            "UTC-7 (MST)", "UTC-6 (CST)", "UTC-5 (EST)", "UTC-4", "UTC-3",
+            "UTC-2", "UTC-1", "UTC+0", "UTC+1", "UTC+2", "UTC+3",
+            "UTC+4", "UTC+5", "UTC+5:30 (IST)", "UTC+6", "UTC+7",
+            "UTC+8 (CST/SGT)", "UTC+9 (JST/KST)", "UTC+10", "UTC+11", "UTC+12"
+        ]
+        
+        self.from_tz_select = toga.Selection(
+            items=self.tz_options,
+            value="UTC+0",
+            style=Pack(margin=2, flex=1)
+        )
+        self.to_tz_select = toga.Selection(
+            items=self.tz_options,
+            value="UTC-8 (PST)",
+            style=Pack(margin=2, flex=1)
+        )
+        
+        self.convert_tz_btn = toga.Button(
+            "Convert Selected",
+            on_press=self.convert_timezone,
+            style=Pack(margin=5)
+        )
+        
+        tz_box = toga.Box(
+            children=[
+                toga.Box(
+                    children=[toga.Label("From:", style=Pack(width=40)), self.from_tz_select],
+                    style=Pack(direction=ROW, margin=2)
+                ),
+                toga.Box(
+                    children=[toga.Label("To:", style=Pack(width=40)), self.to_tz_select],
+                    style=Pack(direction=ROW, margin=2)
+                ),
+                self.convert_tz_btn,
+            ],
+            style=Pack(direction=COLUMN, margin=5)
+        )
+        
+        # Divider
+        divider3 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
+        
+        # Sync points section
+        sync_label = toga.Label("Reference Sync", style=Pack(font_weight='bold', margin=(10, 5)))
+        
+        self.sync_a_label = toga.Label("Sync A: (not set)", style=Pack(margin=5, font_size=10))
+        self.sync_b_label = toga.Label("Sync B: (not set)", style=Pack(margin=5, font_size=10))
+        
+        self.set_sync_a_btn = toga.Button(
+            "Set Sync Point A",
+            on_press=self.set_sync_point_a,
+            style=Pack(margin=2, flex=1)
+        )
+        self.set_sync_b_btn = toga.Button(
+            "Set Sync Point B",
+            on_press=self.set_sync_point_b,
+            style=Pack(margin=2, flex=1)
+        )
+        self.align_sync_btn = toga.Button(
+            "Align B → A",
+            on_press=self.align_sync_points,
+            style=Pack(margin=5)
+        )
+        
+        sync_box = toga.Box(
+            children=[
+                self.sync_a_label,
+                self.sync_b_label,
+                toga.Box(
+                    children=[self.set_sync_a_btn, self.set_sync_b_btn],
+                    style=Pack(direction=ROW)
+                ),
+                self.align_sync_btn,
+            ],
+            style=Pack(direction=COLUMN, margin=5)
+        )
+        
+        # Divider
+        divider4 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
+        
+        # Undo/Redo section
+        history_label = toga.Label("History", style=Pack(font_weight='bold', margin=(10, 5)))
+        
+        self.undo_btn = toga.Button(
+            "↶ Undo",
+            on_press=self.do_undo,
+            enabled=False,
+            style=Pack(margin=2, flex=1)
+        )
+        self.redo_btn = toga.Button(
+            "↷ Redo",
+            on_press=self.do_redo,
+            enabled=False,
+            style=Pack(margin=2, flex=1)
+        )
+        
+        history_btns = toga.Box(
+            children=[self.undo_btn, self.redo_btn],
+            style=Pack(direction=ROW, margin=5)
+        )
+        
+        self.history_label = toga.Label("", style=Pack(margin=5, font_size=10))
+        
+        # Close button
+        close_btn = toga.Button(
+            "Close",
+            on_press=lambda w: self.close(),
+            style=Pack(margin=10)
+        )
+        
+        # Right panel scroll
+        right_content = toga.Box(
+            children=[
+                tools_label,
+                self.selection_info,
+                divider1,
+                quick_select_label,
+                quick_select_box,
+                divider2,
+                shift_label,
+                shift_box,
+                self.tz_label,
+                tz_box,
+                divider3,
+                sync_label,
+                sync_box,
+                divider4,
+                history_label,
+                history_btns,
+                self.history_label,
+                toga.Box(style=Pack(flex=1)),  # Spacer
+                close_btn,
+            ],
+            style=Pack(direction=COLUMN)
+        )
+        
+        right_scroll = toga.ScrollContainer(
+            vertical=True,
+            horizontal=False,
+            style=Pack(width=280)
+        )
+        right_scroll.content = right_content
+        
+        right_panel = toga.Box(
+            children=[right_scroll],
+            style=Pack(direction=COLUMN, width=280, margin=5)
+        )
+        
+        # === Status bar ===
+        self.status_label = toga.Label(
+            "Select a project folder to load clips",
+            style=Pack(margin=10, flex=1)
+        )
+        
+        self.load_btn = toga.Button(
+            "Load Project",
+            on_press=self.load_project,
+            style=Pack(margin=10)
+        )
+        
+        status_bar = toga.Box(
+            children=[self.status_label, self.load_btn],
+            style=Pack(direction=ROW, margin=5)
+        )
+        
+        # === Main layout ===
+        main_area = toga.Box(
+            children=[left_panel, center_panel, right_panel],
+            style=Pack(direction=ROW, flex=1)
+        )
+        
+        self.content = toga.Box(
+            children=[main_area, status_bar],
+            style=Pack(direction=COLUMN)
+        )
+    
+    async def load_project(self, widget):
+        """Load project from the app's current project path."""
+        project_path = self.app_instance.project_path
+        
+        if not project_path or not project_path.exists():
+            self.status_label.text = "No project folder configured. Set it in the main window first."
+            return
+        
+        self.status_label.text = f"Loading clips from {project_path.name}..."
+        
+        try:
+            loop = asyncio.get_running_loop()
+            
+            def do_load():
+                self.engine.load_project(project_path)
+            
+            await loop.run_in_executor(None, do_load)
+            
+            self._refresh_camera_list()
+            self._refresh_timeline()
+            self._update_camera_select()
+            
+            anomaly_count = len(self.engine.get_anomalies())
+            self.status_label.text = (
+                f"Loaded {len(self.engine.clips)} clips from "
+                f"{len(self.engine.cameras)} cameras. "
+                f"{anomaly_count} anomalies detected."
+            )
+        except Exception as e:
+            self.status_label.text = f"Error loading project: {e}"
+            logger.error(f"Failed to load project: {e}")
+    
+    def _refresh_camera_list(self):
+        """Refresh the camera list panel."""
+        self.camera_list_box.clear()
+        self.camera_colors.clear()
+        
+        for idx, camera in enumerate(sorted(self.engine.cameras.keys())):
+            color = CAMERA_COLORS[idx % len(CAMERA_COLORS)]
+            self.camera_colors[camera] = color
+            
+            if camera not in self.camera_visibility:
+                self.camera_visibility[camera] = True
+            
+            clip_count = len(self.engine.cameras[camera])
+            anomaly_count = sum(1 for c in self.engine.cameras[camera] if c.is_anomaly)
+            
+            label_text = f"{camera} ({clip_count})"
+            if anomaly_count > 0:
+                label_text += f" ⚠️{anomaly_count}"
+            
+            # Color indicator
+            color_box = toga.Box(
+                style=Pack(width=12, height=12, background_color=color, margin=(0, 5))
+            )
+            
+            # Visibility checkbox would be ideal, but Toga's checkbox is limited
+            # Use a button toggle instead
+            visible = self.camera_visibility.get(camera, True)
+            toggle_btn = toga.Button(
+                "👁" if visible else "◯",
+                on_press=functools.partial(self._toggle_camera_visibility, camera),
+                style=Pack(width=30, height=24, font_size=10)
+            )
+            
+            label = toga.Label(label_text, style=Pack(flex=1, margin=5))
+            
+            row = toga.Box(
+                children=[color_box, toggle_btn, label],
+                style=Pack(direction=ROW, margin=2, align_items=CENTER)
+            )
+            
+            self.camera_list_box.add(row)
+    
+    def _toggle_camera_visibility(self, camera: str, widget):
+        """Toggle visibility of a camera in the timeline."""
+        self.camera_visibility[camera] = not self.camera_visibility.get(camera, True)
+        self._refresh_camera_list()
+        self._refresh_timeline()
+    
+    def _refresh_timeline(self):
+        """Refresh the timeline visualization."""
+        self.timeline_box.clear()
+        self.clip_widgets.clear()
+        
+        if not self.engine.clips:
+            self.timeline_box.add(
+                toga.Label("No clips loaded", style=Pack(margin=20))
+            )
+            return
+        
+        # Filter visible clips
+        visible_clips = [
+            c for c in self.engine.clips 
+            if self.camera_visibility.get(c.camera, True)
+        ]
+        
+        if not visible_clips:
+            self.timeline_box.add(
+                toga.Label("No visible clips (toggle camera visibility)", style=Pack(margin=20))
+            )
+            return
+        
+        # Sort by timestamp
+        visible_clips.sort(key=lambda c: c.created_at)
+        
+        # Create clip rows
+        for clip in visible_clips:
+            row = self._create_clip_row(clip)
+            self.clip_widgets[clip.path] = row
+            self.timeline_box.add(row)
+    
+    def _create_clip_row(self, clip: ClipInfo) -> toga.Box:
+        """Create a row widget for a clip in the timeline."""
+        color = self.camera_colors.get(clip.camera, "#888888")
+        is_selected = clip.path in self.selected_clips
+        
+        # Color indicator
+        color_box = toga.Box(
+            style=Pack(width=8, height=40, background_color=color)
+        )
+        
+        # Selection indicator
+        select_indicator = toga.Label(
+            "✓" if is_selected else " ",
+            style=Pack(width=20, margin=2, font_weight='bold')
+        )
+        
+        # Anomaly indicator
+        anomaly_text = ""
+        if clip.is_anomaly:
+            sign = "+" if clip.anomaly_gap_hours >= 0 else ""
+            anomaly_text = f"⚠️ {sign}{clip.anomaly_gap_hours:.1f}h gap"
+        
+        # Time and filename
+        time_str = clip.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        duration_str = f"{clip.duration_seconds:.1f}s"
+        
+        info_text = f"{time_str}  |  {clip.path.name}  |  {duration_str}"
+        if anomaly_text:
+            info_text += f"  |  {anomaly_text}"
+        
+        info_label = toga.Label(
+            info_text,
+            style=Pack(flex=1, margin=5, font_size=11)
+        )
+        
+        camera_label = toga.Label(
+            clip.camera,
+            style=Pack(width=100, margin=5, font_size=10, color=color)
+        )
+        
+        # Make clickable by using a button overlay approach
+        # Since Toga doesn't have direct click events on Box, we use a transparent button
+        row = toga.Box(
+            children=[color_box, select_indicator, info_label, camera_label],
+            style=Pack(
+                direction=ROW, 
+                margin=1, 
+                padding=2,
+                background_color="#E8F0FE" if is_selected else "#FFFFFF",
+                align_items=CENTER
+            )
+        )
+        
+        # Store reference for click handling
+        row._clip_info = clip
+        
+        # Use on_press with a button that spans the row
+        select_btn = toga.Button(
+            "",
+            on_press=functools.partial(self._toggle_clip_selection, clip),
+            style=Pack(flex=1, height=44, background_color="transparent")
+        )
+        
+        # Wrap in a clickable container
+        wrapper = toga.Box(
+            children=[row],
+            style=Pack(direction=COLUMN)
+        )
+        
+        # Add click handler via gesture (not directly supported, use button overlay)
+        # For now, add a small select button
+        select_btn = toga.Button(
+            "☐" if not is_selected else "☑",
+            on_press=functools.partial(self._toggle_clip_selection, clip),
+            style=Pack(width=30, height=40, margin=2)
+        )
+        
+        final_row = toga.Box(
+            children=[select_btn, color_box, info_label, camera_label],
+            style=Pack(
+                direction=ROW,
+                margin=1,
+                padding=2,
+                background_color="#E8F0FE" if is_selected else "#FFFFFF",
+                align_items=CENTER
+            )
+        )
+        
+        return final_row
+    
+    def _toggle_clip_selection(self, clip: ClipInfo, widget):
+        """Toggle selection state of a clip."""
+        if clip.path in self.selected_clips:
+            self.selected_clips.remove(clip.path)
+        else:
+            self.selected_clips.add(clip.path)
+        
+        self._refresh_timeline()
+        self._update_selection_info()
+    
+    def _update_selection_info(self):
+        """Update the selection info label."""
+        count = len(self.selected_clips)
+        if count == 0:
+            self.selection_info.text = "No clips selected"
+        else:
+            # Find cameras represented
+            cameras = set()
+            for clip in self.engine.clips:
+                if clip.path in self.selected_clips:
+                    cameras.add(clip.camera)
+            
+            self.selection_info.text = f"{count} clips selected from {len(cameras)} camera(s)"
+    
+    def _update_camera_select(self):
+        """Update the camera dropdown for quick select."""
+        cameras = ["(Select camera)"] + sorted(self.engine.cameras.keys())
+        self.camera_select.items = cameras
+    
+    def _update_history_buttons(self):
+        """Update undo/redo button states."""
+        self.undo_btn.enabled = len(self.engine.undo_stack) > 0
+        self.redo_btn.enabled = len(self.engine.redo_stack) > 0
+        
+        if self.engine.undo_stack:
+            last_op = self.engine.undo_stack[-1]
+            self.history_label.text = f"Last: {last_op.description}"
+        else:
+            self.history_label.text = ""
+    
+    def select_all_clips(self, widget):
+        """Select all visible clips."""
+        for clip in self.engine.clips:
+            if self.camera_visibility.get(clip.camera, True):
+                self.selected_clips.add(clip.path)
+        
+        self._refresh_timeline()
+        self._update_selection_info()
+    
+    def deselect_all_clips(self, widget):
+        """Deselect all clips."""
+        self.selected_clips.clear()
+        self._refresh_timeline()
+        self._update_selection_info()
+    
+    def select_camera_clips(self, widget):
+        """Select all clips from the chosen camera."""
+        camera = self.camera_select.value
+        if camera == "(Select camera)":
+            return
+        
+        for clip in self.engine.cameras.get(camera, []):
+            self.selected_clips.add(clip.path)
+        
+        self._refresh_timeline()
+        self._update_selection_info()
+    
+    def select_anomalies(self, widget):
+        """Select all clips flagged as anomalies."""
+        for clip in self.engine.get_anomalies():
+            self.selected_clips.add(clip.path)
+        
+        self._refresh_timeline()
+        self._update_selection_info()
+    
+    def run_detect_anomalies(self, widget):
+        """Re-run anomaly detection."""
+        anomalies = self.engine.detect_anomalies()
+        self._refresh_camera_list()
+        self._refresh_timeline()
+        self.status_label.text = f"Detected {len(anomalies)} timestamp anomalies"
+    
+    async def apply_shift(self, widget):
+        """Apply time shift to selected clips."""
+        if not self.selected_clips:
+            self.status_label.text = "No clips selected"
+            return
+        
+        time_str = self.shift_input.value.strip()
+        if not time_str:
+            self.status_label.text = "Enter a time offset (e.g., +01:00:00)"
+            return
+        
+        delta = self.engine.parse_time_delta(time_str)
+        if delta is None:
+            self.status_label.text = "Invalid time format. Use ±HH:MM:SS"
+            return
+        
+        # Get selected ClipInfo objects
+        selected = [c for c in self.engine.clips if c.path in self.selected_clips]
+        
+        self.status_label.text = f"Applying {time_str} to {len(selected)} clips..."
+        self.apply_shift_btn.enabled = False
+        
+        try:
+            loop = asyncio.get_running_loop()
+            
+            def do_shift():
+                return self.engine.apply_shift(selected, delta)
+            
+            success = await loop.run_in_executor(None, do_shift)
+            
+            self._refresh_timeline()
+            self._update_history_buttons()
+            
+            if success:
+                self.status_label.text = f"Successfully shifted {len(selected)} clips by {time_str}"
+            else:
+                self.status_label.text = f"Shifted clips (some errors occurred)"
+        except Exception as e:
+            self.status_label.text = f"Error: {e}"
+            logger.error(f"Shift failed: {e}")
+        finally:
+            self.apply_shift_btn.enabled = True
+    
+    def _parse_tz_offset(self, tz_str: str) -> int:
+        """Parse timezone string to hours offset."""
+        # Extract numeric part
+        import re
+        match = re.search(r'UTC([+-]?\d+(?::\d+)?)', tz_str)
+        if match:
+            offset_str = match.group(1)
+            if ':' in offset_str:
+                parts = offset_str.split(':')
+                hours = int(parts[0])
+                minutes = int(parts[1]) if len(parts) > 1 else 0
+                return hours * 60 + (minutes if hours >= 0 else -minutes)
+            return int(offset_str) * 60
+        return 0
+    
+    async def convert_timezone(self, widget):
+        """Convert selected clips from one timezone to another."""
+        if not self.selected_clips:
+            self.status_label.text = "No clips selected"
+            return
+        
+        from_tz = self._parse_tz_offset(self.from_tz_select.value)
+        to_tz = self._parse_tz_offset(self.to_tz_select.value)
+        
+        # Calculate offset in minutes
+        offset_minutes = to_tz - from_tz
+        delta = timedelta(minutes=offset_minutes)
+        
+        if delta.total_seconds() == 0:
+            self.status_label.text = "Same timezone selected"
+            return
+        
+        selected = [c for c in self.engine.clips if c.path in self.selected_clips]
+        
+        offset_str = self.engine.format_time_delta(delta)
+        self.status_label.text = f"Converting {len(selected)} clips by {offset_str}..."
+        
+        try:
+            loop = asyncio.get_running_loop()
+            
+            def do_shift():
+                return self.engine.apply_shift(selected, delta)
+            
+            await loop.run_in_executor(None, do_shift)
+            
+            self._refresh_timeline()
+            self._update_history_buttons()
+            self.status_label.text = f"Converted {len(selected)} clips from {self.from_tz_select.value} to {self.to_tz_select.value}"
+        except Exception as e:
+            self.status_label.text = f"Error: {e}"
+    
+    def set_sync_point_a(self, widget):
+        """Set sync point A from the first selected clip."""
+        if not self.selected_clips:
+            self.status_label.text = "Select a clip first"
+            return
+        
+        # Use first selected clip
+        for clip in self.engine.clips:
+            if clip.path in self.selected_clips:
+                self.sync_point_a = clip
+                self.sync_a_label.text = f"Sync A: {clip.path.name} @ {clip.created_at.strftime('%H:%M:%S')}"
+                self.status_label.text = f"Set sync point A: {clip.path.name}"
+                return
+    
+    def set_sync_point_b(self, widget):
+        """Set sync point B from the first selected clip."""
+        if not self.selected_clips:
+            self.status_label.text = "Select a clip first"
+            return
+        
+        for clip in self.engine.clips:
+            if clip.path in self.selected_clips:
+                self.sync_point_b = clip
+                self.sync_b_label.text = f"Sync B: {clip.path.name} @ {clip.created_at.strftime('%H:%M:%S')}"
+                self.status_label.text = f"Set sync point B: {clip.path.name}"
+                return
+    
+    async def align_sync_points(self, widget):
+        """Align sync point B's camera to sync point A."""
+        if not self.sync_point_a or not self.sync_point_b:
+            self.status_label.text = "Set both sync points first"
+            return
+        
+        if self.sync_point_a.camera == self.sync_point_b.camera:
+            self.status_label.text = "Sync points must be from different cameras"
+            return
+        
+        # Calculate offset
+        delta = self.engine.calculate_sync_offset(self.sync_point_a, self.sync_point_b)
+        
+        # Apply to all clips from sync_point_b's camera
+        camera_clips = self.engine.cameras.get(self.sync_point_b.camera, [])
+        
+        offset_str = self.engine.format_time_delta(delta)
+        self.status_label.text = f"Aligning {len(camera_clips)} clips by {offset_str}..."
+        
+        try:
+            loop = asyncio.get_running_loop()
+            
+            def do_shift():
+                return self.engine.apply_shift(camera_clips, delta)
+            
+            await loop.run_in_executor(None, do_shift)
+            
+            self._refresh_timeline()
+            self._update_history_buttons()
+            self.status_label.text = (
+                f"Aligned {self.sync_point_b.camera} to {self.sync_point_a.camera} "
+                f"({offset_str})"
+            )
+        except Exception as e:
+            self.status_label.text = f"Error: {e}"
+    
+    async def do_undo(self, widget):
+        """Undo the last operation."""
+        self.status_label.text = "Undoing..."
+        
+        try:
+            loop = asyncio.get_running_loop()
+            operation = await loop.run_in_executor(None, self.engine.undo)
+            
+            if operation:
+                self._refresh_timeline()
+                self._update_history_buttons()
+                self.status_label.text = f"Undone: {operation.description}"
+            else:
+                self.status_label.text = "Nothing to undo"
+        except Exception as e:
+            self.status_label.text = f"Undo failed: {e}"
+    
+    async def do_redo(self, widget):
+        """Redo the last undone operation."""
+        self.status_label.text = "Redoing..."
+        
+        try:
+            loop = asyncio.get_running_loop()
+            operation = await loop.run_in_executor(None, self.engine.redo)
+            
+            if operation:
+                self._refresh_timeline()
+                self._update_history_buttons()
+                self.status_label.text = f"Redone: {operation.description}"
+            else:
+                self.status_label.text = "Nothing to redo"
+        except Exception as e:
+            self.status_label.text = f"Redo failed: {e}"
+
+
 class TvasStatusApp(toga.App):
     def __init__(
         self,
@@ -772,16 +1585,24 @@ class TvasStatusApp(toga.App):
             style=Pack(margin=(5, 5), height=32)
         )
         
-        outline_row = toga.Box(
+        # Timestamp Fixer button
+        self.timestamp_fixer_btn = toga.Button(
+            "🕐 Fix Timestamps",
+            on_press=self.open_timestamp_fixer,
+            style=Pack(margin=(5, 5), height=32)
+        )
+        
+        tools_row = toga.Box(
             children=[
                 toga.Box(style=Pack(width=100)),  # Spacer for alignment
                 self.outline_gen_btn,
+                self.timestamp_fixer_btn,
             ],
             style=STYLES['layout_row_section']
         )
         
         path_box = toga.Box(
-            children=[path_section_label, sd_row, project_row, proxy_row, outline_row],
+            children=[path_section_label, sd_row, project_row, proxy_row, tools_row],
             style=STYLES['layout_column_section']
         )
         
@@ -999,6 +1820,11 @@ class TvasStatusApp(toga.App):
         """Open the outline generator window."""
         outline_window = OutlineGeneratorWindow(self)
         outline_window.show()
+
+    def open_timestamp_fixer(self, widget):
+        """Open the timestamp fixer window."""
+        timestamp_window = TimestampFixerWindow(self)
+        timestamp_window.show()
 
     # === SETTINGS ===
     
