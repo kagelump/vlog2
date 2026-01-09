@@ -180,6 +180,267 @@ class SettingsWindow(toga.Window):
         self.close()
 
 
+class OutlineGeneratorWindow(toga.Window):
+    """Window for generating outline.md from vlog_plan.md using AI."""
+    
+    def __init__(self, app_instance):
+        super().__init__(title="Generate Outline from Plan", size=(1200, 800))
+        self.app_instance = app_instance
+        self.plan_path = self._get_plan_path()
+        self.outline_path = self._get_outline_path()
+        self.init_ui()
+    
+    def _get_plan_path(self) -> Path:
+        """Get path to vlog_plan.md."""
+        proxy_dir = self.app_instance._get_proxy_dir()
+        return proxy_dir.parent / "vlog_plan.md"
+    
+    def _get_outline_path(self) -> Path:
+        """Get path to outline.md."""
+        proxy_dir = self.app_instance._get_proxy_dir()
+        return proxy_dir.parent / "outline.md"
+    
+    def init_ui(self):
+        # Model selection dropdown
+        model_options = [
+            "━━━ FREE ━━━",
+            "xiaomi/mimo-v2-flash:free",
+            "openai/gpt-oss-120b:free",
+            "━━━ CHEAP ($0.10/M) ━━━",
+            "google/gemini-2.5-flash-lite",
+            "deepseek/deepseek-r1-0528-qwen3-8b",
+            "qwen/qwen3-next-80b-a3b-instruct",
+            "━━━ CHEAP-ISH ($0.25/M) ━━━",
+            "openai/gpt-5-mini",
+            "qwen/qwen3-vl-235b-a22b-instruct",
+            "━━━ MID-TIER ($0.50/M) ━━━",
+            "deepseek/deepseek-v3.2",
+            "google/gemini-3-flash-preview",
+            "━━━ UPPER MID-TIER ($1/M) ━━━",
+            "anthropic/claude-haiku-4.5",
+            "━━━ EXPENSIVE ($3/M) ━━━",
+            "google/gemini-3-pro-preview",
+            "anthropic/claude-sonnet-4.5",
+            "openai/gpt-5.2",
+        ]
+        
+        # Filter out separator entries for value checking
+        valid_models = [m for m in model_options if not m.startswith("━━━")]
+        
+        # Default to gemini-2.5-flash-lite
+        default_model = "google/gemini-2.5-flash-lite"
+        if self.app_instance.model in valid_models:
+            default_model = self.app_instance.model
+        
+        self.model_select = toga.Selection(
+            items=model_options,
+            value=default_model,
+            style=Pack(flex=1, margin=(0, 10))
+        )
+        
+        # Load existing files if they exist
+        plan_content = ""
+        if self.plan_path.exists():
+            try:
+                plan_content = self.plan_path.read_text()
+            except Exception as e:
+                logger.warning(f"Failed to load existing plan: {e}")
+        
+        outline_content = ""
+        if self.outline_path.exists():
+            try:
+                outline_content = self.outline_path.read_text()
+            except Exception as e:
+                logger.warning(f"Failed to load existing outline: {e}")
+        
+        # Left panel: Vlog Plan editor
+        plan_label = toga.Label("Vlog Plan (vlog_plan.md)", style=Pack(font_weight='bold', margin=5))
+        self.plan_editor = toga.MultilineTextInput(
+            value=plan_content,
+            placeholder="Describe your vlog plan here...\n\nExample:\n- Opening: Introduce the day's adventure\n- Main: Show hiking to the waterfall\n- Ending: Sunset reflection",
+            style=Pack(flex=1, font_family="monospace", font_size=11)
+        )
+        
+        plan_box = toga.Box(
+            children=[plan_label, self.plan_editor],
+            style=Pack(direction=COLUMN, flex=1, margin=(0, 5))
+        )
+        
+        # Right panel: Outline editor
+        outline_label = toga.Label("Story Beats Outline (outline.md)", style=Pack(font_weight='bold', margin=5))
+        self.outline_editor = toga.MultilineTextInput(
+            value=outline_content,
+            placeholder="AI-generated outline will appear here...",
+            style=Pack(flex=1, font_family="monospace", font_size=11)
+        )
+        
+        outline_box = toga.Box(
+            children=[outline_label, self.outline_editor],
+            style=Pack(direction=COLUMN, flex=1, margin=(0, 5))
+        )
+        
+        # Main editor area
+        editor_area = toga.Box(
+            children=[plan_box, outline_box],
+            style=Pack(direction=ROW, flex=1)
+        )
+        
+        # Bottom controls
+        model_label = toga.Label("Model:", style=Pack(margin=(5, 5)))
+        self.status_label = toga.Label("", style=Pack(flex=1, margin=(5, 10)))
+        
+        self.generate_btn = toga.Button(
+            "Generate Outline",
+            on_press=self.generate_outline,
+            style=Pack(margin=5, width=150)
+        )
+        
+        self.save_btn = toga.Button(
+            "Save Both",
+            on_press=self.save_files,
+            style=Pack(margin=5, width=100)
+        )
+        
+        close_btn = toga.Button(
+            "Close",
+            on_press=lambda w: self.close(),
+            style=Pack(margin=5, width=80)
+        )
+        
+        controls = toga.Box(
+            children=[
+                model_label,
+                self.model_select,
+                self.status_label,
+                self.generate_btn,
+                self.save_btn,
+                close_btn
+            ],
+            style=Pack(direction=ROW, margin=10)
+        )
+        
+        # Main layout
+        self.content = toga.Box(
+            children=[editor_area, controls],
+            style=Pack(direction=COLUMN)
+        )
+    
+    def save_files(self, widget):
+        """Save both plan and outline files."""
+        try:
+            # Ensure directory exists
+            self.plan_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save plan
+            self.plan_path.write_text(self.plan_editor.value)
+            
+            # Save outline
+            self.outline_path.write_text(self.outline_editor.value)
+            
+            # Update main app outline path
+            self.app_instance.outline_path = self.outline_path
+            self.app_instance._update_button_states()
+            
+            self.status_label.text = "Saved successfully!"
+            logger.info(f"Saved plan and outline")
+        except Exception as e:
+            error_msg = f"Error saving: {e}"
+            self.status_label.text = error_msg
+            logger.error(error_msg)
+    
+    async def generate_outline(self, widget):
+        """Generate outline from plan using AI."""
+        plan_text = self.plan_editor.value.strip()
+        if not plan_text:
+            self.status_label.text = "Please write a plan first!"
+            return
+        
+        # Check for analysis.json
+        proxy_dir = self.app_instance._get_proxy_dir()
+        analysis_json_path = proxy_dir / "analysis.json"
+        
+        if not analysis_json_path.exists():
+            self.status_label.text = "No analysis.json found. Run analysis first!"
+            return
+        
+        self.generate_btn.enabled = False
+        self.status_label.text = "Generating outline..."
+        
+        try:
+            loop = asyncio.get_running_loop()
+            
+            def do_generation():
+                # Load analysis
+                with open(analysis_json_path, 'r') as f:
+                    analysis_data = json.load(f)
+                
+                # Format clip summaries
+                clip_summaries = []
+                for clip in analysis_data.get('clips', []):
+                    summary = f"Clip: {clip.get('clip_name', 'Unknown')}\n"
+                    summary += f"Duration: {clip.get('duration_seconds', 0):.1f}s\n"
+                    if clip.get('clip_description'):
+                        summary += f"Description: {clip['clip_description']}\n"
+                    if clip.get('subject_keywords'):
+                        summary += f"Subjects: {', '.join(clip['subject_keywords'])}\n"
+                    if clip.get('action_keywords'):
+                        summary += f"Actions: {', '.join(clip['action_keywords'])}\n"
+                    clip_summaries.append(summary)
+                
+                footage_list = "\n---\n".join(clip_summaries)
+                
+                # Construct prompt
+                system_prompt = (
+                    "You are an expert video editing assistant helping edit a vlog. "
+                    "Help organize the footage by thinking of story beats, and then aligning each clip to a beat. "
+                    "You are provided a plan as well as a list of footage that has been AI described.\n\n"
+                    "Create an outline.md file with the following structure:\n"
+                    "# Beat Title\nBrief description of this story beat\n\n"
+                    "Repeat for each beat. Be specific and creative based on the available footage."
+                )
+                
+                user_prompt = f"""# Vlog Plan
+{plan_text}
+
+# Available Footage
+{footage_list}
+
+Please create a story beats outline that organizes this footage according to the plan."""
+                
+                # Call VLM (skip separator entries in model selection)
+                from shared.vlm_client import call_vlm
+                
+                selected_model = self.model_select.value
+                # If a separator was somehow selected, use default
+                if selected_model.startswith("━━━"):
+                    selected_model = "google/gemini-2.5-flash-lite"
+                
+                response = call_vlm(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    model_name=selected_model,
+                    api_base=self.app_instance.api_base,
+                    api_key=self.app_instance.api_key,
+                    images=[],
+                    provider_preferences=None
+                )
+                
+                return response
+            
+            outline_text = await loop.run_in_executor(None, do_generation)
+            
+            # Update outline editor
+            self.outline_editor.value = outline_text
+            self.status_label.text = "Outline generated! Review and save."
+            
+        except Exception as e:
+            error_msg = f"Generation failed: {e}"
+            self.status_label.text = error_msg
+            logger.error(error_msg)
+        finally:
+            self.generate_btn.enabled = True
+
+
 class ClipPreviewWindow(toga.Window):
     """Window showing video frame preview for a clip."""
     
@@ -269,7 +530,7 @@ class TvasStatusApp(toga.App):
         self.total_processing_time = 0.0
         self.items_with_timing = 0
         self.project_name: Optional[str] = None
-        self.outline_path: Optional[Path] = None
+        self._outline_path_override: Optional[Path] = None
 
     def exit_handler(self, app):
         """Handle app exit."""
@@ -496,22 +757,17 @@ class TvasStatusApp(toga.App):
             style=STYLES['layout_row_section']
         )
         
-        # Outline file (for beat alignment)
-        self.outline_input = toga.TextInput(
-            readonly=True,
-            placeholder="Optional: outline.md for beat alignment...",
-            style=STYLES['input_readonly']
+        # Generate Outline button
+        self.outline_gen_btn = toga.Button(
+            "Generate Outline from Plan",
+            on_press=self.open_outline_generator,
+            style=Pack(margin=(5, 5), height=32)
         )
-        self.outline_browse_btn = toga.Button("Browse...", on_press=self.select_outline_file, style=STYLES['button_action'])
-        # Spacer to align with rows that have two buttons
-        outline_spacer = toga.Box(style=Pack(width=65, margin=(0, 5)))
         
         outline_row = toga.Box(
             children=[
-                toga.Label("Outline:", style=Pack(margin=(5, 5), width=100)),
-                self.outline_input,
-                self.outline_browse_btn,
-                outline_spacer,
+                toga.Box(style=Pack(width=100)),  # Spacer for alignment
+                self.outline_gen_btn,
             ],
             style=STYLES['layout_row_section']
         )
@@ -731,14 +987,10 @@ class TvasStatusApp(toga.App):
             self.proxy_input
         )
 
-    async def select_outline_file(self, widget):
-        """Select outline file for beat alignment."""
-        await self._select_path(
-            "Select outline file",
-            "outline_path",
-            self.outline_input,
-            is_file=True
-        )
+    def open_outline_generator(self, widget):
+        """Open the outline generator window."""
+        outline_window = OutlineGeneratorWindow(self)
+        outline_window.show()
 
     # === SETTINGS ===
     
@@ -772,6 +1024,24 @@ class TvasStatusApp(toga.App):
         if self.project_path:
             return self.project_path.name
         return datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    @property
+    def outline_path(self) -> Optional[Path]:
+        """Get outline.md path (auto-detects next to proxy directory)."""
+        if self._outline_path_override:
+            return self._outline_path_override
+        
+        try:
+            proxy_dir = self._get_proxy_dir()
+            outline = proxy_dir.parent / "outline.md"
+            return outline if outline.exists() else outline
+        except:
+            return None
+    
+    @outline_path.setter
+    def outline_path(self, value: Optional[Path]):
+        """Set outline path override."""
+        self._outline_path_override = value
 
     def _get_proxy_dir(self) -> Path:
         """Get the proxy directory path."""
