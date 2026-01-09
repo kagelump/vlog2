@@ -79,6 +79,10 @@ def main():
         logger.error("No clips found in analysis.json")
         sys.exit(1)
 
+    # Sort clips by original file creation timestamp
+    logger.info("Sorting clips by created_timestamp...")
+    clips_data.sort(key=lambda x: x.get("metadata", {}).get("created_timestamp") or "")
+
     media_pool = project.GetMediaPool()
     root_folder = media_pool.GetRootFolder()
     
