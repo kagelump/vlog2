@@ -1644,12 +1644,29 @@ class TvasStatusApp(toga.App):
         if analysis.people_presence:
             details_text += f"People: {analysis.people_presence}\n"
         
+        if analysis.best_moment:
+            details_text += f"\n--- Best Moment ---\n"
+            bs = analysis.best_moment.get("start_sec")
+            be = analysis.best_moment.get("end_sec")
+            score = analysis.best_moment.get("score")
+            if bs is not None and be is not None:
+                details_text += f"Window: {bs:.2f}s - {be:.2f}s (Score: {score})\n"
+
         if analysis.needs_trim:
-            details_text += f"\n--- Trim Suggestion ---\n"
+            details_text += f"\n--- Technical Trim ---\n"
             if analysis.suggested_in_point is not None:
                 details_text += f"In: {analysis.suggested_in_point:.2f}s\n"
             if analysis.suggested_out_point is not None:
                 details_text += f"Out: {analysis.suggested_out_point:.2f}s\n"
+        
+        if analysis.action_peaks:
+            details_text += f"\n--- Action Peaks ---\n"
+            details_text += ", ".join([f"{p:.1f}s" for p in analysis.action_peaks]) + "\n"
+        
+        if analysis.dead_zones:
+            details_text += f"\n--- Dead Zones ---\n"
+            for dz in analysis.dead_zones:
+                details_text += f"{dz.get('start_sec', 0):.1f}s - {dz.get('end_sec', 0):.1f}s\n"
         
         if analysis.beat_title:
             details_text += f"\n--- Beat Assignment ---\n"

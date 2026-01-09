@@ -5,90 +5,23 @@ This module handles technical trim detection using VLM on the start/end segments
 
 import json
 import logging
-import subprocess
-import tempfile
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Any
 
 from shared import DEFAULT_VLM_MODEL, load_prompt
 from shared.vlm_client import VLMClient
-from shared.proxy import get_video_duration
-from shared.ffmpeg_utils import detect_best_video_codec, check_ffmpeg_available
-from tvas.analysis import ClipAnalysis, aggregate_analysis_json
+from tvas.analysis import aggregate_analysis_json
 
 logger = logging.getLogger(__name__)
 
 VIDEO_TRIM_PROMPT = load_prompt("video_trim.txt")
-TRIM_CONTEXT_SECONDS = 5.0
-
-def generate_trim_proxy(video_path: Path) -> Path | None:
-    """Generate a temporary proxy containing only the start and end segments.
-    
-    Returns:
-        Path to the temporary file, or None if failed/unnecessary.
-    """
-    if not check_ffmpeg_available():
-        logger.error("FFmpeg not available for trim proxy generation")
-        return None
-
-    duration = get_video_duration(video_path)
-    if not duration or duration < (TRIM_CONTEXT_SECONDS * 2) + 1:
-        # Clip is short enough, just use original
-        return video_path
-
-    # Create temp file
-    temp_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-    output_path = Path(temp_file.name)
-    temp_file.close()
-
-    try:
-        # Construct filter_complex to concat start and end
-        # Use a slightly shorter duration to avoid potential EOF issues with trim
-        safe_duration = duration - 0.1
-        
-        filter_complex = (
-            f"[0:v]trim=0:{TRIM_CONTEXT_SECONDS},setpts=PTS-STARTPTS[v0];"
-            f"[0:v]trim={safe_duration-TRIM_CONTEXT_SECONDS}:{safe_duration},setpts=PTS-STARTPTS[v1];"
-            f"[v0][v1]concat=n=2:v=1[outv]"
-        )
-        
-        # We explicitly disable audio (-an) to avoid complexity with audio stream matching
-        codec_flags = detect_best_video_codec()
-        
-        cmd = [
-            "ffmpeg", "-y", "-v", "error",
-            "-i", str(video_path),
-            "-filter_complex", filter_complex,
-            "-map", "[outv]"
-        ] + codec_flags + [
-            "-an", 
-            str(output_path)
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, check=True, text=True)
-        return output_path
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to generate trim proxy for {video_path}: {e}")
-        if e.stderr:
-            logger.warning(f"FFmpeg stderr: {e.stderr}")
-        if e.stdout:
-            logger.warning(f"FFmpeg stdout: {e.stdout}")
-        if output_path.exists():
-            output_path.unlink()
-        return None
-    except Exception as e:
-        logger.warning(f"Failed to generate trim proxy for {video_path}: {e}")
-        if output_path.exists():
-            output_path.unlink()
-        return None
 
 def detect_trim_for_file(
     json_path: Path,
     client: VLMClient,
 ) -> bool:
-    """Detect trim points for a single clip sidecar file.
+    """Detect trim points and best moments for a single clip sidecar file.
     
     Returns: True if processed, False if skipped.
     """
@@ -99,19 +32,17 @@ def detect_trim_for_file(
         logger.error(f"Failed to load {json_path}: {e}")
         return False
 
-    # Check if trim already exists
-    if "trim" in data and isinstance(data["trim"], dict):
+    # Check if trim already exists and has the new best_moment field
+    if "trim" in data and isinstance(data["trim"], dict) and "best_moment" in data["trim"]:
         logger.info(f"Skipping trim for {json_path.name} (already exists)")
         return False
 
     # Check classification
-    # Data structure: data['beat']['classification'] or top level?
-    # align_beats updates "beat" object.
     classification = None
     if "beat" in data and isinstance(data["beat"], dict):
         classification = data["beat"].get("classification")
     
-    if classification in ["REMOVE", "WEAK"]:
+    if classification in ["REMOVE", "WEAK", "HERO"]:
         logger.info(f"Skipping trim for {json_path.name} ({classification})")
         return False
 
@@ -144,9 +75,9 @@ def detect_trim_for_file(
         logger.warning(f"No video file found for {json_path.name}")
         return False
 
-    trim_proxy = generate_trim_proxy(video_path)
-    used_proxy = trim_proxy and trim_proxy != video_path
-    target_path = trim_proxy if trim_proxy else video_path
+    # We no longer use generate_trim_proxy because we need to see the full clip
+    # for "Best Moment" detection.
+    target_path = video_path
     
     try:
         response = client.generate_from_video(
@@ -165,60 +96,36 @@ def detect_trim_for_file(
                 
             try:
                 result = json.loads(text)
-                trim_needed = result.get("trim_needed", False)
                 
-                # Update data with nested trim object
+                tech_trim = result.get("technical_trim", {})
+                best_moment = result.get("best_moment", {})
+                
+                trim_needed = tech_trim.get("trim_needed", False)
+                start_sec = tech_trim.get("start_sec")
+                end_sec = tech_trim.get("end_sec")
+                reason = tech_trim.get("reason")
+                
+                # Update data with comprehensive trim object
                 trim_data = {
                     "trim_needed": trim_needed,
-                    "suggested_in_point": None,
-                    "suggested_out_point": None,
-                    "reason": None
+                    "suggested_in_point": start_sec,
+                    "suggested_out_point": end_sec,
+                    "reason": reason,
+                    "technical_trim": tech_trim,
+                    "best_moment": best_moment,
+                    "action_peaks": result.get("action_peaks", []),
+                    "dead_zones": result.get("dead_zones", [])
                 }
                 
                 if trim_needed:
-                    start_rel = result.get("start_sec")
-                    end_rel = result.get("end_sec")
-                    reason = result.get("reason")
-                    
-                    duration = data.get("metadata", {}).get("duration_seconds") or get_video_duration(video_path) or 0
-                    
-                    final_start = 0.0
-                    final_end = duration
-                    
-                    if start_rel is not None:
-                        # Logic: if start_rel < TRIM_CONTEXT_SECONDS, it's in the first segment
-                        if start_rel <= TRIM_CONTEXT_SECONDS:
-                            final_start = start_rel
-                        # If > context, it's weird, likely near start?
-                        
-                    if end_rel is not None:
-                        if used_proxy:
-                            if end_rel >= TRIM_CONTEXT_SECONDS:
-                                # In second segment
-                                offset = end_rel - TRIM_CONTEXT_SECONDS
-                                final_end = (duration - TRIM_CONTEXT_SECONDS) + offset
-                            else:
-                                # In first segment? 
-                                final_end = end_rel
-                        else:
-                            final_end = end_rel
-                    
-                    # Safety clamps
-                    final_start = max(0.0, final_start)
-                    final_end = min(duration, final_end)
-                    if final_start >= final_end:
-                        final_start = 0.0
-                        final_end = duration
-                        trim_data["trim_needed"] = False # Invalidate
-                    else:
-                        trim_data["suggested_in_point"] = final_start
-                        trim_data["suggested_out_point"] = final_end
-                        trim_data["reason"] = reason
-                        
-                    logger.info(f"Trim detected for {json_path.name}: {final_start:.1f}-{final_end:.1f}")
-                else:
-                    logger.info(f"No trim needed for {json_path.name}")
+                    logger.info(f"Trim detected for {json_path.name}: {start_sec}-{end_sec}")
                 
+                if best_moment:
+                    bs = best_moment.get("start_sec")
+                    be = best_moment.get("end_sec")
+                    score = best_moment.get("score")
+                    logger.info(f"Best moment for {json_path.name}: {bs}-{be} (score: {score})")
+
                 # Save nested object
                 data["trim"] = trim_data
                 
@@ -230,9 +137,6 @@ def detect_trim_for_file(
                 logger.error(f"Failed to parse trim response for {json_path.name}")
     except Exception as e:
         logger.error(f"Trim processing failed for {json_path.name}: {e}")
-    finally:
-        if used_proxy and trim_proxy.exists():
-            trim_proxy.unlink()
             
     return True
 

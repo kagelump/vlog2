@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from tvas.trim import detect_trims_batch, generate_trim_proxy, detect_trim_for_file
+from tvas.trim import detect_trims_batch, detect_trim_for_file
 
 class TestTrimDetection:
     @pytest.fixture
@@ -14,41 +14,7 @@ class TestTrimDetection:
             client = mock.return_value
             yield client
 
-    @pytest.fixture
-    def mock_ffmpeg(self):
-        with patch("subprocess.run") as mock:
-            mock.return_value.returncode = 0
-            yield mock
-            
-    @pytest.fixture
-    def mock_duration(self):
-        with patch("tvas.trim.get_video_duration", return_value=60.0) as mock:
-            yield mock
-            
-    @pytest.fixture
-    def mock_check_ffmpeg(self):
-        with patch("tvas.trim.check_ffmpeg_available", return_value=True) as mock:
-            yield mock
-
-    def test_generate_trim_proxy(self, tmp_path, mock_ffmpeg, mock_duration, mock_check_ffmpeg):
-        video = tmp_path / "video.mp4"
-        video.touch()
-        
-        # Should generate a temp file (NamedTemporaryFile creates it on disk)
-        proxy = generate_trim_proxy(video)
-        assert proxy is not None
-        assert proxy.exists()
-        
-        # Verify FFmpeg call
-        # args[0] is the command list
-        cmd = mock_ffmpeg.call_args[0][0]
-        # Check for filter complex string in arguments
-        assert any("trim=0:5.0" in arg for arg in cmd)
-        
-        if proxy != video and proxy.exists():
-            proxy.unlink()
-
-    def test_detect_trim_parsing(self, tmp_path, mock_vlm_client, mock_ffmpeg, mock_duration, mock_check_ffmpeg):
+    def test_detect_trim_parsing(self, tmp_path, mock_vlm_client):
         # Setup
         video = tmp_path / "video.mp4"
         video.touch()
@@ -58,13 +24,23 @@ class TestTrimDetection:
             "metadata": {"duration_seconds": 60.0}
         }))
         
-        # Mock VLM response
-        # Scenario: Start trim at 2.0 (in first 5s), End trim at 7.0 (relative to 10s stitched)
-        # Stitched: 0-5s (original 0-5), 5-10s (original 55-60)
-        # Rel 2.0 -> Orig 2.0
-        # Rel 7.0 -> Orig 55 + (7-5) = 57.0
+        # Mock VLM response with new format
         mock_response = MagicMock()
-        mock_response.text = '{"trim_needed": true, "start_sec": 2.0, "end_sec": 7.0, "reason": "shake"}'
+        mock_response.text = json.dumps({
+            "best_moment": {
+                "start_sec": 5.0,
+                "end_sec": 9.0,
+                "score": 9
+            },
+            "technical_trim": {
+                "trim_needed": True,
+                "start_sec": 1.0,
+                "end_sec": 58.0,
+                "reason": "shake"
+            },
+            "action_peaks": [10.0, 20.0],
+            "dead_zones": [{"start_sec": 30.0, "end_sec": 35.0}]
+        })
         mock_vlm_client.generate_from_video.return_value = mock_response
         
         # Run
@@ -77,16 +53,20 @@ class TestTrimDetection:
         assert "trim" in data
         trim_data = data["trim"]
         assert trim_data["trim_needed"] is True
-        assert trim_data["suggested_in_point"] == 2.0
-        assert trim_data["suggested_out_point"] == 57.0
-        assert trim_data["reason"] == "shake"
+        assert trim_data["suggested_in_point"] == 1.0
+        assert trim_data["suggested_out_point"] == 58.0
+        assert trim_data["best_moment"]["score"] == 9
+        assert trim_data["action_peaks"] == [10.0, 20.0]
+        assert len(trim_data["dead_zones"]) == 1
 
     def test_skip_existing_trim(self, tmp_path, mock_vlm_client):
         # Setup
         json_path = tmp_path / "existing.json"
         json_path.write_text(json.dumps({
             "source_path": "video.mp4",
-            "trim": {"trim_needed": False}
+            "trim": {
+                "best_moment": {"start_sec": 1.0, "end_sec": 4.0, "score": 8}
+            }
         }))
         
         # Run
@@ -100,6 +80,17 @@ class TestTrimDetection:
         json_path.write_text(json.dumps({
             "source_path": "video.mp4",
             "beat": {"classification": "REMOVE"}
+        }))
+        
+        detect_trim_for_file(json_path, mock_vlm_client)
+        
+        mock_vlm_client.generate_from_video.assert_not_called()
+
+    def test_skip_hero_clips(self, tmp_path, mock_vlm_client):
+        json_path = tmp_path / "hero.json"
+        json_path.write_text(json.dumps({
+            "source_path": "video.mp4",
+            "beat": {"classification": "HERO"}
         }))
         
         detect_trim_for_file(json_path, mock_vlm_client)

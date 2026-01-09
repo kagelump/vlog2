@@ -91,6 +91,9 @@ class ClipAnalysis:
     beat_title: str | None = None
     beat_classification: str | None = None
     beat_reasoning: str | None = None
+    best_moment: dict | None = None
+    action_peaks: list[float] | None = None
+    dead_zones: list[dict] | None = None
 
 
 def validate_model_output(parsed: Any) -> dict:
@@ -407,10 +410,23 @@ def describe_clip(
     # Extract clip name from VLM suggestions
     clip_name = vlm_result.get("clip_name")
     
-    # Trim detection moved to separate phase
-    needs_trim = False
-    trim_start = None
-    trim_end = None
+    # Extract trim info from nested 'trim' object if it exists (from trim.py)
+    trim_info = vlm_result.get("trim", {})
+    if not isinstance(trim_info, dict):
+        trim_info = {}
+        
+    needs_trim = trim_info.get("trim_needed", False)
+    trim_start = trim_info.get("suggested_in_point")
+    trim_end = trim_info.get("suggested_out_point")
+    
+    best_moment = trim_info.get("best_moment")
+    action_peaks = trim_info.get("action_peaks")
+    dead_zones = trim_info.get("dead_zones")
+
+    # Extract beat info if it exists
+    beat_info = vlm_result.get("beat", {})
+    if not isinstance(beat_info, dict):
+        beat_info = {}
 
     # Get file timestamps
     stat_info = source_path.stat()
@@ -440,6 +456,13 @@ def describe_clip(
         modified_timestamp=datetime.fromtimestamp(modified_ts).strftime("%Y-%m-%d %H:%M:%S"),
         thumbnail_timestamp_sec=vlm_result.get("thumbnail_timestamp_sec"),
         analysis_duration=analysis_duration,
+        beat_id=beat_info.get("beat_id"),
+        beat_title=beat_info.get("beat_title"),
+        beat_classification=beat_info.get("classification"),
+        beat_reasoning=beat_info.get("reasoning"),
+        best_moment=best_moment,
+        action_peaks=action_peaks,
+        dead_zones=dead_zones,
     )
 
 

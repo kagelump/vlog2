@@ -174,17 +174,33 @@ def main():
         # Get trim info from nested object, fallback to top-level for backward compatibility or if flattened
         trim_info = clip_info.get("trim") or clip_info
         
-        start_sec = trim_info.get("suggested_in_point")
-        end_sec = trim_info.get("suggested_out_point")
+        # Check for Insta-cut mode (Best Moment)
+        insta_cut = os.environ.get("TVAS_INSTA_CUT") == "1"
+        best_moment = trim_info.get("best_moment")
         
-        # Duration is usually in metadata or top level
-        duration_sec = clip_info.get("duration_seconds", 0)
-        
-        # Check needs_trim flag
-        needs_trim = trim_info.get("trim_needed")
-        if needs_trim is None:
-             # Fallback to old key
-             needs_trim = trim_info.get("needs_trim", False)
+        needs_trim = False
+        start_sec = None
+        end_sec = None
+
+        if classification == "HERO":
+             # Force full clip for HERO shots
+             needs_trim = False
+             logger.info(f"Using full clip for HERO: {source_path.name}")
+        elif insta_cut and best_moment:
+            start_sec = best_moment.get("start_sec")
+            end_sec = best_moment.get("end_sec")
+            needs_trim = True
+            if start_sec is not None and end_sec is not None:
+                logger.info(f"Using Best Moment (Insta-cut) for {source_path.name}: {start_sec}-{end_sec}")
+        else:
+            start_sec = trim_info.get("suggested_in_point")
+            end_sec = trim_info.get("suggested_out_point")
+            
+            # Check needs_trim flag
+            needs_trim = trim_info.get("trim_needed")
+            if needs_trim is None:
+                 # Fallback to old key
+                 needs_trim = trim_info.get("needs_trim", False)
         
         if needs_trim and (start_sec is not None or end_sec is not None):
             start_frame = int((start_sec or 0.0) * fps)
