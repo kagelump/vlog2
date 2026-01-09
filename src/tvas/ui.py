@@ -1256,13 +1256,30 @@ class TvasStatusApp(toga.App):
         """Run Stage 3: AI Analysis."""
         proxy_dir = self._get_proxy_dir()
         
+        # Build source map to link proxies back to archival files
+        source_map = {}
+        if self.project_path and self.project_path.exists():
+            video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF', '.mts', '.MTS', '.insv', '.INSV', '.insp', '.INSP'}
+            # Check subdirectories (Camera folders)
+            for subdir in self.project_path.iterdir():
+                if subdir.is_dir() and not subdir.name.startswith('.'):
+                    for video_file in subdir.iterdir():
+                        if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+                            source_map[video_file.stem] = video_file
+            # Check root directory
+            for video_file in self.project_path.iterdir():
+                if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+                    source_map[video_file.stem] = video_file
+        
         # Find clips to analyze
         clips_to_analyze = []
         
         if proxy_dir.exists():
             for proxy_file in proxy_dir.glob("*.mp4"):
                 if not proxy_file.name.startswith('.'):
-                    clips_to_analyze.append((proxy_file, proxy_file))
+                    # Resolve source path using map, fallback to proxy itself if not found
+                    source_path = source_map.get(proxy_file.stem, proxy_file)
+                    clips_to_analyze.append((source_path, proxy_file))
         elif self.project_path:
             # Analyze source files directly
             video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF'}

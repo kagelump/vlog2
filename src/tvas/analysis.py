@@ -331,6 +331,15 @@ def describe_clip(
                 vlm_result = json.load(f)
             logger.info(f"Using cached analysis for {video_to_analyze.name}")
             analysis_duration = 0.0  # Cached results take negligible time
+            
+            # Update source_path if missing or different (e.g. if we just resolved it to archival)
+            saved_source = vlm_result.get("source_path")
+            if saved_source != str(source_path):
+                logger.info(f"Updating source_path in cached JSON for {video_to_analyze.name}")
+                vlm_result["source_path"] = str(source_path)
+                with open(json_path, "w") as f:
+                    json.dump(vlm_result, f, indent=2)
+                    
         except Exception as e:
             logger.warning(f"Failed to load cached analysis from {json_path}: {e}")
 
@@ -381,6 +390,10 @@ def describe_clip(
                 modified_ts = stat_info.st_mtime
                 
                 json_data = vlm_result.copy()
+                json_data["source_path"] = str(source_path)
+                if proxy_path:
+                    json_data["proxy_path"] = str(proxy_path)
+                    
                 json_data["metadata"] = {
                     "duration_seconds": duration,
                     "created_timestamp": datetime.fromtimestamp(created_ts).strftime("%Y-%m-%d %H:%M:%S"),
