@@ -57,8 +57,13 @@ or you simply prefer faster processing, you can use a cloud provider.
 
 - **SD Card Detection**: Automatically detects camera SD cards (Sony A7C, DJI Pocket 3, iPhone, Insta360)
 - **Smart Ingestion**: Copies files with SHA256 verification and organized folder structure
+- **Timestamp Alignment**: Interactive tool to correct timestamps across multiple cameras (sync timezones, fix clock drifts)
+- **Proxy Generation**: Create ProRes edit proxies using FFmpeg
 - **AI Analysis**: Uses Qwen3-VL (8B) via mlx-vlm for intelligent junk detection on Apple Silicon
 - **OpenCV Pre-screening**: Fast blur and darkness detection before VLM analysis
+- **Outline Generation**: AI-powered tool to suggest a story outline from your plan and footage
+- **Beat Alignment**: Detects music beats and snaps clips to cues (requires analysis)
+- **Trim Detection**: AI suggests optimal start/end points for clips
 - **Review UI**: Native macOS UI (Toga) for reviewing AI decisions
 - **Timeline Generation**: Generates an import script for DaVinci Resolve
 
@@ -218,9 +223,11 @@ After running `tprs`, the XMP sidecar files will be created next to your photos.
 ## Pipeline Stages
 
 1. **Ingestion**: Copy files from SD card with verification
-2. **Proxy Generation**: Create ProRes edit proxies using FFmpeg
-3. **AI Analysis**: Generate clip names and suggest trim points using Qwen3 VL (8B)
-4. **Timeline Generation**: Run the generated script in DaVinci Resolve to import clips and build timeline
+2. **Timestamp Alignment**: (Optional) Fix camera clock issues
+3. **Proxy Generation**: Create ProRes edit proxies using FFmpeg
+4. **AI Analysis**: Generate clip names and suggest trim points using Qwen3 VL (8B)
+5. **Outline & Beats**: Create story outline and align clips to music beats
+6. **Timeline Generation**: Run the generated script in DaVinci Resolve to import clips and build timeline
 
 ## Configuration
 
