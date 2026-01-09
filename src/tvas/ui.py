@@ -473,6 +473,7 @@ Please create a story beats outline that organizes this footage according to the
                     images=[],
                     provider_preferences=None,
                     max_tokens=6000,
+                    app_name='tvas (outline)'
                 )
                 
                 return response

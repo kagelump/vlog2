@@ -111,13 +111,15 @@ def call_vlm(
     images: Optional[list[Path]] = None,
     provider_preferences: Optional[str] = None,
     max_tokens: int = 3000
+    app_name: str = "tvas"
 ) -> str:
     """Wrapper function to call VLM API or local model."""
     client = VLMClient(
         model_name=model_name,
         api_base=api_base,
         api_key=api_key,
-        provider_preferences=provider_preferences
+        provider_preferences=provider_preferences,
+        app_name=app_name
     )
     
     full_prompt = prompt
