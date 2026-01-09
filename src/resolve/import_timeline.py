@@ -202,6 +202,9 @@ def main():
                  # Fallback to old key
                  needs_trim = trim_info.get("needs_trim", False)
         
+        # Create append entry for this clip
+        append_entry = None
+        
         if needs_trim and (start_sec is not None or end_sec is not None):
             start_frame = int((start_sec or 0.0) * fps)
             total_frames = int(item.GetClipProperty("Frames") or (duration_sec * fps))
@@ -217,22 +220,28 @@ def main():
                     "startFrame": start_frame,
                     "endFrame": end_frame - 1
                 }
-        
-        # Add to beat group
-        if beat_id not in beats:
-            beats[beat_id] = {
-                "title": beat_title,
-                "clips": []
-            }
-            beat_order.append(beat_id)
         else:
-            # Consolidate titles: choose the shorter non-empty title to ensure consistency
-            current_title = beats[beat_id]["title"]
-            if beat_title and beat_title.strip():
-                if not current_title or len(beat_title) < len(current_title):
-                    beats[beat_id]["title"] = beat_title
+            # Use full clip if no trim needed
+            append_entry = {
+                "mediaPoolItem": item
+            }
         
-        beats[beat_id]["clips"].append(append_entry)
+        # Add to beat group only if we have a valid entry
+        if append_entry:
+            if beat_id not in beats:
+                beats[beat_id] = {
+                    "title": beat_title,
+                    "clips": []
+                }
+                beat_order.append(beat_id)
+            else:
+                # Consolidate titles: choose the shorter non-empty title to ensure consistency
+                current_title = beats[beat_id]["title"]
+                if beat_title and beat_title.strip():
+                    if not current_title or len(beat_title) < len(current_title):
+                        beats[beat_id]["title"] = beat_title
+            
+            beats[beat_id]["clips"].append(append_entry)
 
     if not beats:
         logger.error("No clips available to add to timeline.")
