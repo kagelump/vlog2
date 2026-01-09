@@ -101,14 +101,10 @@ def main():
         timelines_bin = root_folder
 
     # Create import-specific bin for clips
-    import_name = f"TVAS Import {export_time}".strip()
-    if not import_name:
-        import_name = "TVAS Import"
-        
     try:
-        target_bin = media_pool.AddSubFolder(root_folder, import_name)
+        target_bin = media_pool.AddSubFolder(root_folder, "Clips")
         if not target_bin:
-            logger.warning(f"Could not create bin '{import_name}', using root.")
+            logger.warning(f"Could not create bin 'Clips', using root.")
             target_bin = root_folder
         else:
             media_pool.SetCurrentFolder(target_bin)
@@ -178,8 +174,6 @@ def main():
         # Get trim info from nested object, fallback to top-level for backward compatibility or if flattened
         trim_info = clip_info.get("trim") or clip_info
         
-        # Check for Insta-cut mode (Best Moment)
-        insta_cut = os.environ.get("TVAS_INSTA_CUT") == "1"
         best_moment = trim_info.get("best_moment")
         
         needs_trim = False
@@ -190,7 +184,7 @@ def main():
              # Force full clip for HERO shots
              needs_trim = False
              logger.info(f"Using full clip for HERO: {source_path.name}")
-        elif insta_cut and best_moment:
+        elif best_moment:
             start_sec = best_moment.get("start_sec")
             end_sec = best_moment.get("end_sec")
             needs_trim = True
@@ -255,11 +249,6 @@ def main():
     try:
         # Set current folder to Timelines bin
         media_pool.SetCurrentFolder(timelines_bin)
-        
-        # Create a folder for this import's timelines if using multiple
-        import_timelines_bin = media_pool.AddSubFolder(timelines_bin, import_name)
-        if import_timelines_bin:
-             media_pool.SetCurrentFolder(import_timelines_bin)
         
         for beat_id in beat_order:
             beat_data = beats[beat_id]
