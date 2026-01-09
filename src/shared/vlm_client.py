@@ -110,7 +110,7 @@ def call_vlm(
     api_key: Optional[str] = None,
     images: Optional[list[Path]] = None,
     provider_preferences: Optional[str] = None,
-    max_tokens: int = 3000
+    max_tokens: int = 3000,
     app_name: str = "tvas"
 ) -> str:
     """Wrapper function to call VLM API or local model."""
