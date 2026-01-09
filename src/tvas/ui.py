@@ -472,7 +472,7 @@ Please create a story beats outline that organizes this footage according to the
                     api_key=self.app_instance.api_key,
                     images=[],
                     provider_preferences=None,
-                    max_tokens=6000,
+                    max_tokens=10000,
                     app_name='tvas (outline)'
                 )
                 
