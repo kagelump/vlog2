@@ -7,6 +7,9 @@ Create an outline.md file with the following structure for each beat:
 # Beat number: Beat Title
 Description of this story beat
 
+Date(s): Approximately what days
+Location: Description of locations covering this beat
+
 **Narrative Arc:** 
 - What is the narrative arc of this beat?
 
