@@ -8,9 +8,10 @@ Input Data:
 
 Instructions:
 - Analyze the Current Clip's content (description, keywords, time, location) and compare it against the Outline's beats.
+  - Time is the most important factor as beats are always ordered chronologically.
 - Determine the most suitable "Beat" for this clip.
 - If the clip does not fit any specific beat well, assign it to "Unassigned" or a generic "B-Roll" beat if appropriate.
-- Clips are ordered chronologically, so consider the previous clip's assigned beat for context.
+- Clips are ordered chronologically, so always consider the previous clip's assigned beat for context.
 - look for specific visual cues mentioned in the outline (e.g. "red bag", "sunset").
 - Classification:
     - Determine the value of the clip based *specifically* on alignment with the outline's notes.
