@@ -11,6 +11,7 @@ from typing import Optional, Any
 
 from shared import DEFAULT_VLM_MODEL, load_prompt
 from shared.vlm_client import VLMClient
+from shared.clip_formatter import format_clip_for_prompt
 from tvas.analysis import aggregate_analysis_json
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ VIDEO_TRIM_PROMPT = load_prompt("video_trim.txt")
 def detect_trim_for_file(
     json_path: Path,
     client: VLMClient,
+    outline_text: Optional[str] = None,
 ) -> bool:
     """Detect trim points and best moments for a single clip sidecar file.
     
@@ -79,9 +81,22 @@ def detect_trim_for_file(
     # for "Best Moment" detection.
     target_path = video_path
     
+    # Construct Prompt with Context
+    # 1. Base Prompt
+    # 2. Outline (Global Context)
+    # 3. Clip Analysis (Local Context)
+    
+    prompt = f"{VIDEO_TRIM_PROMPT}\n\n"
+    
+    if outline_text:
+        prompt += f"--- STORY OUTLINE ---\n{outline_text}\n\n"
+        
+    # Add clip analysis context using shared formatter for consistency
+    prompt += f"--- CLIP ANALYSIS ---\n{format_clip_for_prompt(data, include_technical=True)}\n"
+
     try:
         response = client.generate_from_video(
-            prompt=VIDEO_TRIM_PROMPT,
+            prompt=prompt,
             video_path=target_path,
             fps=1.0, 
             max_pixels=224*224
@@ -142,6 +157,7 @@ def detect_trim_for_file(
 
 def detect_trims_batch(
     project_dir: Path,
+    outline_path: Optional[Path] = None,
     model_name: str = DEFAULT_VLM_MODEL,
     api_base: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -165,6 +181,17 @@ def detect_trims_batch(
         return
 
     logger.info(f"Starting trim detection for {len(json_files)} clips...")
+    
+    # Load Outline if available
+    outline_text = None
+    if outline_path and outline_path.exists():
+        try:
+            outline_text = outline_path.read_text()
+            logger.info(f"Loaded story outline from {outline_path}")
+        except Exception as e:
+            logger.warning(f"Failed to read outline from {outline_path}: {e}")
+    elif outline_path:
+        logger.warning(f"Outline file not found: {outline_path}")
     
     # Initialize VLM Client
     # Thread-safety is handled by VLMClient internals usually, but we need per-thread clients if using API?
@@ -200,9 +227,9 @@ def detect_trims_batch(
             if max_workers > 1 and api_base:
                 # Create new client for each? Or share?
                 # VLMClient with API is thread safe (urllib).
-                futures[executor.submit(detect_trim_for_file, json_path, client)] = json_path
+                futures[executor.submit(detect_trim_for_file, json_path, client, outline_text)] = json_path
             else:
-                futures[executor.submit(detect_trim_for_file, json_path, client)] = json_path
+                futures[executor.submit(detect_trim_for_file, json_path, client, outline_text)] = json_path
                 
         for future in as_completed(futures):
             json_path = futures[future]

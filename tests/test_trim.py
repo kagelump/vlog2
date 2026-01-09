@@ -59,6 +59,34 @@ class TestTrimDetection:
         assert trim_data["action_peaks"] == [10.0, 20.0]
         assert len(trim_data["dead_zones"]) == 1
 
+    def test_detect_trim_with_outline(self, tmp_path, mock_vlm_client):
+        # Setup
+        video = tmp_path / "video.mp4"
+        video.touch()
+        json_path = tmp_path / "video.json"
+        json_path.write_text(json.dumps({
+            "source_path": str(video),
+            "metadata": {"duration_seconds": 60.0},
+            "clip_description": "A test clip"
+        }))
+        
+        mock_response = MagicMock()
+        mock_response.text = json.dumps({"technical_trim": {"trim_needed": False}})
+        mock_vlm_client.generate_from_video.return_value = mock_response
+        
+        outline_text = "This is a story outline."
+        
+        # Run
+        detect_trim_for_file(json_path, mock_vlm_client, outline_text=outline_text)
+        
+        # Verify prompt contains outline
+        args, kwargs = mock_vlm_client.generate_from_video.call_args
+        prompt = kwargs.get("prompt")
+        assert "--- STORY OUTLINE ---" in prompt
+        assert outline_text in prompt
+        assert "--- CLIP ANALYSIS ---" in prompt
+        assert "A test clip" in prompt
+
     def test_skip_existing_trim(self, tmp_path, mock_vlm_client):
         # Setup
         json_path = tmp_path / "existing.json"

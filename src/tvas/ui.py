@@ -27,6 +27,7 @@ from shared import DEFAULT_VLM_MODEL, load_prompt, set_prompt_override, get_open
 from shared.vlm_client import CostTracker, fetch_available_models
 from shared.paths import detect_archival_root, find_latest_project
 from shared.ffmpeg_utils import extract_thumbnail
+from shared.clip_formatter import format_clips_for_prompt
 from tvas.analysis import ClipAnalysis, analyze_clips_batch
 from tvas.trim import detect_trims_batch
 from tvas.beats import align_beats
@@ -395,52 +396,8 @@ class OutlineGeneratorWindow(toga.Window):
                 with open(analysis_json_path, 'r') as f:
                     analysis_data = json.load(f)
                 
-                # Handle both list and dict formats
-                clips = analysis_data if isinstance(analysis_data, list) else analysis_data.get('clips', [])
-                
-                # Format clip summaries
-                clip_summaries = []
-                for clip in clips:
-                    metadata = clip.get('metadata', {})
-                    summary = f"Clip: {clip.get('clip_name', 'Unknown')}\n"
-                    
-                    # Metadata
-                    if metadata.get('created_timestamp'):
-                        summary += f"Timestamp: {metadata['created_timestamp']}\n"
-                    if metadata.get('duration'):
-                        summary += f"Duration: {metadata['duration']}s\n"
-                    elif clip.get('duration_seconds'):
-                        summary += f"Duration: {clip['duration_seconds']:.1f}s\n"
-                    
-                    # Context
-                    if clip.get('time_of_day'):
-                        summary += f"Time: {clip['time_of_day']}\n"
-                    if clip.get('environment'):
-                        summary += f"Environment: {clip['environment']}\n"
-                    if clip.get('people_presence'):
-                        summary += f"People: {clip['people_presence']}\n"
-                    if clip.get('landmark_identification'):
-                        summary += f"Landmarks: {clip['landmark_identification']}\n"
-                    if clip.get('detected_text'):
-                        summary += f"Text: {clip['detected_text']}\n"
-                    if clip.get('mood'):
-                        summary += f"Mood: {clip['mood']}\n"
-                    
-                    # Descriptions
-                    if clip.get('clip_description'):
-                        summary += f"Description: {clip['clip_description']}\n"
-                    if clip.get('audio_description'):
-                        summary += f"Audio: {clip['audio_description']}\n"
-                    
-                    # Keywords
-                    if clip.get('subject_keywords'):
-                        summary += f"Subjects: {', '.join(clip['subject_keywords'])}\n"
-                    if clip.get('action_keywords'):
-                        summary += f"Actions: {', '.join(clip['action_keywords'])}\n"
-                        
-                    clip_summaries.append(summary)
-                
-                footage_list = "\n---\n".join(clip_summaries)
+                # Format clip summaries using shared formatter
+                footage_list = format_clips_for_prompt(analysis_data, separator="\n---\n")
                 
                 # Load system prompt from file
                 from shared import load_prompt
@@ -1381,6 +1338,7 @@ class TvasStatusApp(toga.App):
             
             detect_trims_batch(
                 project_dir=proxy_dir,
+                outline_path=self.outline_path,
                 model_name=self.model,
                 api_base=self.api_base,
                 api_key=self.api_key,
