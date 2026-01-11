@@ -808,7 +808,7 @@ class TimestampFixerWindow(toga.Window):
         right_scroll = toga.ScrollContainer(
             vertical=True,
             horizontal=False,
-            style=Pack(width=280)
+            style=Pack(width=280, flex=1)
         )
         right_scroll.content = right_content
         
