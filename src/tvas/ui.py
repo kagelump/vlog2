@@ -1099,6 +1099,16 @@ class TimestampFixerWindow(toga.Window):
             self.history_label.text = f"Last: {last_op.description}"
         else:
             self.history_label.text = ""
+
+    def _update_clip_visuals(self):
+        """Update visual state of all clip rows without rebuilding."""
+        for path, row in self.clip_widgets.items():
+            is_selected = path in self.selected_clips
+            # Update background
+            row.style.background_color = "#E8F0FE" if is_selected else "#FFFFFF"
+            # Update button text (child 0 is the select button)
+            if row.children:
+                row.children[0].text = "☑" if is_selected else "☐"
     
     def select_all_clips(self, widget):
         """Select all visible clips."""
@@ -1106,13 +1116,13 @@ class TimestampFixerWindow(toga.Window):
             if self.camera_visibility.get(clip.camera, True):
                 self.selected_clips.add(clip.path)
         
-        self._refresh_timeline()
+        self._update_clip_visuals()
         self._update_selection_info()
     
     def deselect_all_clips(self, widget):
         """Deselect all clips."""
         self.selected_clips.clear()
-        self._refresh_timeline()
+        self._update_clip_visuals()
         self._update_selection_info()
     
     def select_camera_clips(self, widget):
@@ -1124,7 +1134,7 @@ class TimestampFixerWindow(toga.Window):
         for clip in self.engine.cameras.get(camera, []):
             self.selected_clips.add(clip.path)
         
-        self._refresh_timeline()
+        self._update_clip_visuals()
         self._update_selection_info()
     
     def select_range_clips(self, widget):
@@ -1159,7 +1169,7 @@ class TimestampFixerWindow(toga.Window):
         count_added = len(self.selected_clips) - count_before
         self.status_label.text = f"Selected {count_added} additional clips in range"
         
-        self._refresh_timeline()
+        self._update_clip_visuals()
         self._update_selection_info()
 
     def select_anomalies(self, widget):
@@ -1167,7 +1177,7 @@ class TimestampFixerWindow(toga.Window):
         for clip in self.engine.get_anomalies():
             self.selected_clips.add(clip.path)
         
-        self._refresh_timeline()
+        self._update_clip_visuals()
         self._update_selection_info()
     
     def run_detect_anomalies(self, widget):
