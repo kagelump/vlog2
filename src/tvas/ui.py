@@ -823,6 +823,8 @@ class TimestampFixerWindow(toga.Window):
             style=Pack(margin=10, flex=1)
         )
         
+        self.progress_bar = toga.ProgressBar(max=100, value=0, style=Pack(margin=(10, 5), width=200))
+        
         self.load_btn = toga.Button(
             "Load Project",
             on_press=self.load_project,
@@ -830,8 +832,8 @@ class TimestampFixerWindow(toga.Window):
         )
         
         status_bar = toga.Box(
-            children=[self.status_label, self.load_btn],
-            style=Pack(direction=ROW, margin=5)
+            children=[self.status_label, self.progress_bar, self.load_btn],
+            style=Pack(direction=ROW, margin=5, align_items=CENTER)
         )
         
         # === Main layout ===
@@ -854,12 +856,24 @@ class TimestampFixerWindow(toga.Window):
             return
         
         self.status_label.text = f"Loading clips from {project_path.name}..."
+        self.progress_bar.value = 0
+        self.progress_bar.max = 100 # Will be updated by callback
+        self.load_btn.enabled = False
         
         try:
             loop = asyncio.get_running_loop()
             
+            def update_progress(current, total, message):
+                def _update():
+                    self.progress_bar.max = total
+                    self.progress_bar.value = current
+                    self.status_label.text = message
+                
+                # Schedule update on main thread
+                self.app_instance.loop.call_soon_threadsafe(_update)
+            
             def do_load():
-                self.engine.load_project(project_path)
+                self.engine.load_project(project_path, progress_callback=update_progress)
             
             await loop.run_in_executor(None, do_load)
             
@@ -876,6 +890,9 @@ class TimestampFixerWindow(toga.Window):
         except Exception as e:
             self.status_label.text = f"Error loading project: {e}"
             logger.error(f"Failed to load project: {e}")
+        finally:
+            self.load_btn.enabled = True
+            self.progress_bar.value = 0
     
     def _refresh_camera_list(self):
         """Refresh the camera list panel."""
