@@ -628,8 +628,14 @@ class TimestampFixerWindow(toga.Window):
             style=Pack(margin=5)
         )
         
+        self.select_range_btn = toga.Button(
+            "Select Range (Min ↔ Max)",
+            on_press=self.select_range_clips,
+            style=Pack(margin=5)
+        )
+        
         quick_select_box = toga.Box(
-            children=[self.camera_select, self.select_camera_btn],
+            children=[self.camera_select, self.select_camera_btn, self.select_range_btn],
             style=Pack(direction=COLUMN, margin=5)
         )
         
@@ -951,6 +957,23 @@ class TimestampFixerWindow(toga.Window):
             self.clip_widgets[clip.path] = row
             self.timeline_box.add(row)
     
+    def _play_clip(self, clip: ClipInfo, widget):
+        """Open the clip in the default system player."""
+        import platform
+        import subprocess
+        import os
+        
+        try:
+            if platform.system() == "Darwin":
+                subprocess.run(["open", str(clip.path)])
+            elif platform.system() == "Windows":
+                os.startfile(clip.path)
+            else:
+                subprocess.run(["xdg-open", str(clip.path)])
+        except Exception as e:
+            logger.error(f"Failed to play clip: {e}")
+            self.status_label.text = f"Failed to play clip: {e}"
+
     def _create_clip_row(self, clip: ClipInfo) -> toga.Box:
         """Create a row widget for a clip in the timeline."""
         color = self.camera_colors.get(clip.camera, "#888888")
@@ -959,12 +982,6 @@ class TimestampFixerWindow(toga.Window):
         # Color indicator
         color_box = toga.Box(
             style=Pack(width=8, height=40, background_color=color)
-        )
-        
-        # Selection indicator
-        select_indicator = toga.Label(
-            "✓" if is_selected else " ",
-            style=Pack(width=20, margin=2, font_weight='bold')
         )
         
         # Anomaly indicator
@@ -991,45 +1008,22 @@ class TimestampFixerWindow(toga.Window):
             style=Pack(width=100, margin=5, font_size=10, color=color)
         )
         
-        # Make clickable by using a button overlay approach
-        # Since Toga doesn't have direct click events on Box, we use a transparent button
-        row = toga.Box(
-            children=[color_box, select_indicator, info_label, camera_label],
-            style=Pack(
-                direction=ROW, 
-                margin=1, 
-                padding=2,
-                background_color="#E8F0FE" if is_selected else "#FFFFFF",
-                align_items=CENTER
-            )
-        )
-        
-        # Store reference for click handling
-        row._clip_info = clip
-        
-        # Use on_press with a button that spans the row
-        select_btn = toga.Button(
-            "",
-            on_press=functools.partial(self._toggle_clip_selection, clip),
-            style=Pack(flex=1, height=44, background_color="transparent")
-        )
-        
-        # Wrap in a clickable container
-        wrapper = toga.Box(
-            children=[row],
-            style=Pack(direction=COLUMN)
-        )
-        
-        # Add click handler via gesture (not directly supported, use button overlay)
-        # For now, add a small select button
+        # Select checkbox
         select_btn = toga.Button(
             "☐" if not is_selected else "☑",
             on_press=functools.partial(self._toggle_clip_selection, clip),
             style=Pack(width=30, height=40, margin=2)
         )
+
+        # Play button
+        play_btn = toga.Button(
+            "▶",
+            on_press=functools.partial(self._play_clip, clip),
+            style=Pack(width=30, height=40, margin=2)
+        )
         
         final_row = toga.Box(
-            children=[select_btn, color_box, info_label, camera_label],
+            children=[select_btn, play_btn, color_box, info_label, camera_label],
             style=Pack(
                 direction=ROW,
                 margin=1,
@@ -1043,12 +1037,20 @@ class TimestampFixerWindow(toga.Window):
     
     def _toggle_clip_selection(self, clip: ClipInfo, widget):
         """Toggle selection state of a clip."""
-        if clip.path in self.selected_clips:
+        is_selected = clip.path in self.selected_clips
+        
+        if is_selected:
             self.selected_clips.remove(clip.path)
+            widget.text = "☐"
         else:
             self.selected_clips.add(clip.path)
+            widget.text = "☑"
+            
+        # Update row background color
+        if clip.path in self.clip_widgets:
+            row = self.clip_widgets[clip.path]
+            row.style.background_color = "#E8F0FE" if not is_selected else "#FFFFFF"
         
-        self._refresh_timeline()
         self._update_selection_info()
     
     def _update_selection_info(self):
@@ -1108,6 +1110,41 @@ class TimestampFixerWindow(toga.Window):
         self._refresh_timeline()
         self._update_selection_info()
     
+    def select_range_clips(self, widget):
+        """Select all visible clips between the earliest and latest selected clips."""
+        if len(self.selected_clips) < 2:
+            self.status_label.text = "Select at least 2 clips to define a range"
+            return
+        
+        # Find time range of currently selected clips
+        selected_clip_infos = [
+            c for c in self.engine.clips 
+            if c.path in self.selected_clips
+        ]
+        
+        if not selected_clip_infos:
+            return
+
+        min_time = min(c.created_at for c in selected_clip_infos)
+        max_time = max(c.created_at for c in selected_clip_infos)
+        
+        count_before = len(self.selected_clips)
+        
+        # Select all visible clips within range
+        for clip in self.engine.clips:
+            # Only affect visible cameras
+            if not self.camera_visibility.get(clip.camera, True):
+                continue
+                
+            if min_time <= clip.created_at <= max_time:
+                self.selected_clips.add(clip.path)
+        
+        count_added = len(self.selected_clips) - count_before
+        self.status_label.text = f"Selected {count_added} additional clips in range"
+        
+        self._refresh_timeline()
+        self._update_selection_info()
+
     def select_anomalies(self, widget):
         """Select all clips flagged as anomalies."""
         for clip in self.engine.get_anomalies():

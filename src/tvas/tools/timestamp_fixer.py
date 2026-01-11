@@ -120,6 +120,9 @@ class TimeShiftEngine:
         
         for search_dir in search_dirs:
             for video_path in search_dir.rglob("*"):
+                if video_path.name.startswith("."):
+                    continue
+                
                 if video_path.suffix.lower() in VIDEO_EXTENSIONS and video_path.is_file():
                     # Determine camera name from parent folder structure
                     # Expected: ingested/YYYY-MM-DD/CameraName/file.mp4
@@ -199,6 +202,8 @@ class TimeShiftEngine:
         # Get duration using ffprobe
         try:
             duration = get_video_duration(path)
+            if duration is None:
+                duration = 0.0
         except Exception:
             duration = 0.0
         
