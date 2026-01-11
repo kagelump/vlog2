@@ -711,6 +711,33 @@ class TimestampFixerWindow(toga.Window):
         # Divider
         divider3 = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
         
+        # Reset from Filename section
+        filename_label = toga.Label("Reset from Filename", style=Pack(font_weight='bold', margin=(10, 5)))
+        
+        self.filename_tz_select = toga.Selection(
+            items=self.tz_options,
+            value="UTC+8 (CST/SGT)",
+            style=Pack(margin=2, flex=1)
+        )
+        
+        self.reset_filename_btn = toga.Button(
+            "Reset Selected from Filename",
+            on_press=self.reset_from_filename,
+            style=Pack(margin=5)
+        )
+        
+        filename_box = toga.Box(
+            children=[
+                toga.Label("Filename Timezone:", style=Pack(margin=2)),
+                self.filename_tz_select,
+                self.reset_filename_btn,
+            ],
+            style=Pack(direction=COLUMN, margin=5)
+        )
+
+        # Divider
+        divider_filename = toga.Box(style=Pack(height=1, background_color='#CCCCCC', margin=(10, 5)))
+        
         # Sync points section
         sync_label = toga.Label("Reference Sync", style=Pack(font_weight='bold', margin=(10, 5)))
         
@@ -793,6 +820,9 @@ class TimestampFixerWindow(toga.Window):
                 self.tz_label,
                 tz_box,
                 divider3,
+                filename_label,
+                filename_box,
+                divider_filename,
                 sync_label,
                 sync_box,
                 divider4,
@@ -1281,6 +1311,45 @@ class TimestampFixerWindow(toga.Window):
         except Exception as e:
             self.status_label.text = f"Error: {e}"
     
+    async def reset_from_filename(self, widget):
+        """Reset timestamps of selected clips based on their filenames."""
+        if not self.selected_clips:
+            self.status_label.text = "No clips selected"
+            return
+        
+        # Parse timezone offset
+        tz_offset = self._parse_tz_offset(self.filename_tz_select.value)
+        
+        selected = [c for c in self.engine.clips if c.path in self.selected_clips]
+        
+        self.status_label.text = f"Resetting {len(selected)} clips from filenames..."
+        self.reset_filename_btn.enabled = False
+        
+        try:
+            loop = asyncio.get_running_loop()
+            
+            def do_reset():
+                return self.engine.reset_timestamps_from_filename(
+                    selected, 
+                    tz_offset
+                )
+            
+            success = await loop.run_in_executor(None, do_reset)
+            
+            self._refresh_timeline()
+            self._update_history_buttons()
+            
+            if success:
+                self.status_label.text = f"Successfully reset timestamps from filenames"
+            else:
+                self.status_label.text = "No valid timestamps found in filenames"
+                
+        except Exception as e:
+            self.status_label.text = f"Error: {e}"
+            logger.error(f"Reset failed: {e}")
+        finally:
+            self.reset_filename_btn.enabled = True
+
     def set_sync_point_a(self, widget):
         """Set sync point A from the first selected clip."""
         if not self.selected_clips:
