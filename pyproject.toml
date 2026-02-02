@@ -1,51 +1,48 @@
 [build-system]
-requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
-build-backend = "setuptools.build_meta"
+# Switching to hatchling is faster and more reliable with uv
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "tvas"
 dynamic = ["version"]
 description = "Travel Vlog Automation System - Automate vlog ingestion, junk detection, and DaVinci Resolve import"
 readme = "README.md"
-license = {text = "MIT"}
-requires-python = ">=3.11"
+license = { text = "MIT" }
+# Constrain to versions that actually work with your dependencies
+requires-python = ">=3.11, <3.13" 
 dependencies = [
-    "watchdog>=3.0.0",
-    "opencv-python>=4.8.0",
-    "mlx-vlm>=0.3.0",
+    "watchdog>=4.0.0",
+    "opencv-python-headless>=4.8.0", # Better for CLI/Server use
     "toga>=0.4.0",
-    "torchvision",
-    "opencc",
-    "mlx-whisper",
-    "silero-vad",
-    "onnxruntime",
+    "torchvision>=0.16.0",
+    "opencc>=1.1.7",
+    "silero-vad>=5.1.0",
+    "onnxruntime>=1.17.0",
+    # MLX is macOS only; markers prevent installation failures on Windows/Linux
+    "mlx-vlm>=0.3.0; sys_platform == 'darwin'",
+    "mlx-whisper>=0.4.0; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-]
-full = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.3.0", # Modern linting/formatting
 ]
 
 [project.scripts]
 tvas = "tvas.main:main"
 tprs = "tprs.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools.package-data]
-"shared" = ["prompts/*.txt"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/tvas", "src/tprs"]
 
-[tool.setuptools_scm]
-write_to = "src/tvas/_version.py"
+[tool.hatch.build.targets.wheel.shared-data]
+"src/shared/prompts" = "share/tvas/prompts"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
