@@ -26,23 +26,29 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.1.0",
-    "ruff>=0.3.0", # Modern linting/formatting
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+full = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
 ]
 
 [project.scripts]
 tvas = "tvas.main:main"
 tprs = "tprs.cli:main"
 
-[tool.hatch.version]
-source = "vcs"
+[tool.setuptools.packages.find]
+where = ["src"]
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/tvas", "src/tprs"]
+[tool.setuptools.package-data]
+"shared" = ["prompts/*.txt"]
 
-[tool.hatch.build.targets.wheel.shared-data]
-"src/shared/prompts" = "share/tvas/prompts"
+[tool.setuptools_scm]
+write_to = "src/tvas/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
