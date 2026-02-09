@@ -380,7 +380,7 @@ class OutlineGeneratorWindow(toga.Window):
         
         # Check for analysis.json (main dir first, then proxy dir)
         proxy_dir = self.app_instance._get_proxy_dir()
-        main_dir = proxy_dir.parent
+        main_dir = self.app_instance.project_path
         analysis_json_path = main_dir / "analysis.json"
         
         if not analysis_json_path.exists():
