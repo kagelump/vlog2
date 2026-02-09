@@ -2167,20 +2167,20 @@ class TvasStatusApp(toga.App):
             
             def do_proxies():
                 # Find all video files in project folder
-                video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF', '.mts', '.MTS', '.insv', '.INSV', '.insp', '.INSP'}
+                video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.insv', '.insp'}
                 source_files = []
                 
                 # Look in camera subdirectories
                 for subdir in self.project_path.iterdir():
                     if subdir.is_dir() and not subdir.name.startswith('.'):
                         for video_file in subdir.iterdir():
-                            if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+                            if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
                                 source_files.append(video_file)
                 
                 if not source_files:
                     # Also check root of project folder
                     for video_file in self.project_path.iterdir():
-                        if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+                        if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
                             source_files.append(video_file)
                 
                 if not source_files:
@@ -2220,34 +2220,34 @@ class TvasStatusApp(toga.App):
         # Build source map to link proxies back to archival files
         source_map = {}
         if self.project_path and self.project_path.exists():
-            video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF', '.mts', '.MTS', '.insv', '.INSV', '.insp', '.INSP'}
+            video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.insv', '.insp'}
             # Check subdirectories (Camera folders)
             for subdir in self.project_path.iterdir():
                 if subdir.is_dir() and not subdir.name.startswith('.'):
                     for video_file in subdir.iterdir():
-                        if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+                        if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
                             source_map[video_file.stem] = video_file
             # Check root directory
             for video_file in self.project_path.iterdir():
-                if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+                if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
                     source_map[video_file.stem] = video_file
         
         # Find clips to analyze
         clips_to_analyze = []
         
         if proxy_dir.exists():
-            for proxy_file in proxy_dir.glob("*.mp4"):
-                if not proxy_file.name.startswith('.'):
+            for proxy_file in proxy_dir.iterdir():
+                if proxy_file.is_file() and proxy_file.suffix.lower() == '.mp4' and not proxy_file.name.startswith('.'):
                     # Resolve source path using map, fallback to proxy itself if not found
                     source_path = source_map.get(proxy_file.stem, proxy_file)
                     clips_to_analyze.append((source_path, proxy_file))
         elif self.project_path:
             # Analyze source files directly
-            video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF'}
+            video_extensions = {'.mp4', '.mov', '.mxf'}
             for subdir in self.project_path.iterdir():
                 if subdir.is_dir() and not subdir.name.startswith('.'):
                     for video_file in subdir.iterdir():
-                        if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+                        if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
                             clips_to_analyze.append((video_file, None))
         
         if not clips_to_analyze:

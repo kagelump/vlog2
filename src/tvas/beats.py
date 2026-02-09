@@ -118,6 +118,9 @@ def align_beats(
             elif json_path.with_suffix(".mp4").exists():
                 # Try same name as json but .mp4
                 video_path = json_path.with_suffix(".mp4")
+            elif json_path.with_suffix(".MP4").exists():
+                # Try uppercase variant
+                video_path = json_path.with_suffix(".MP4")
                 
             if video_path:
                 logger.info(f"Generating thumbnail for {json_path.name} at {thumb_timestamp}s")

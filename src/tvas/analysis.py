@@ -584,7 +584,12 @@ def aggregate_analysis_json(project_dir: Path) -> Path:
                 if "metadata" in data and "created_timestamp" in data["metadata"]:
                     # Ensure source_path is included if not present (relative to project_dir)
                     if "source_path" not in data:
-                        data["source_path"] = str(json_file.with_suffix(".mp4"))
+                        # Try both .mp4 and .MP4
+                        mp4_path = json_file.with_suffix(".mp4")
+                        if mp4_path.exists():
+                            data["source_path"] = str(mp4_path)
+                        else:
+                            data["source_path"] = str(json_file.with_suffix(".MP4"))
                     all_results.append(data)
         except Exception as e:
             logger.warning(f"Failed to read {json_file}: {e}")

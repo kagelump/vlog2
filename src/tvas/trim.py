@@ -67,11 +67,15 @@ def detect_trim_for_file(
         if source_path.exists():
             video_path = source_path
     
-    # Fallback: use JSON stem + .mp4
+    # Fallback: use JSON stem + .mp4 or .MP4
     if not video_path:
         default_path = json_path.parent / f"{json_path.stem}.mp4"
         if default_path.exists():
             video_path = default_path
+        else:
+            default_path = json_path.parent / f"{json_path.stem}.MP4"
+            if default_path.exists():
+                video_path = default_path
     
     if not video_path:
         logger.warning(f"No video file found for {json_path.name}")

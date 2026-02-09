@@ -138,8 +138,8 @@ class TVASApp:
         # This allows for cumulative processing/export
         if proxy_dir.exists():
             current_proxies = {p for _, p in clips_to_analyze if p}
-            for proxy_file in proxy_dir.glob("*.mp4"):
-                if proxy_file not in current_proxies and not proxy_file.name.startswith('.'):
+            for proxy_file in proxy_dir.iterdir():
+                if proxy_file.is_file() and proxy_file.suffix.lower() == '.mp4' and proxy_file not in current_proxies and not proxy_file.name.startswith('.'):
                     logger.info(f"Found existing proxy: {proxy_file.name}")
                     # For existing proxies, we use the proxy path as source if we can't determine the original
                     clips_to_analyze.append((proxy_file, proxy_file))
@@ -293,11 +293,11 @@ class TVASApp:
             }
 
         # Collect video files from all camera folders
-        video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mts', '.MTS', '.insv', '.INSV', '.insp', '.INSP'}
+        video_extensions = {'.mp4', '.mov', '.mts', '.insv', '.insp'}
         for camera_dir in camera_dirs:
             logger.info(f"Scanning {camera_dir.name}...")
             for video_file in camera_dir.iterdir():
-                if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+                if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
                     source_files.append(video_file)
         
         if not source_files:
@@ -333,10 +333,10 @@ class TVASApp:
 
         # Gather all video files
         source_files = []
-        video_extensions = {'.mp4', '.MP4', '.mov', '.MOV', '.mxf', '.MXF', '.mts', '.MTS', '.insv', '.INSV', '.insp', '.INSP'}
+        video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.insv', '.insp'}
         
         for video_file in directory.iterdir():
-            if video_file.is_file() and video_file.suffix in video_extensions and not video_file.name.startswith('.'):
+            if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
                 source_files.append(video_file)
         
         if not source_files:
