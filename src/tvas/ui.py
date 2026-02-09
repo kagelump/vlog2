@@ -2243,12 +2243,18 @@ class TvasStatusApp(toga.App):
                     clips_to_analyze.append((source_path, proxy_file))
         elif self.project_path:
             # Analyze source files directly
-            video_extensions = {'.mp4', '.mov', '.mxf'}
+            video_extensions = {'.mp4', '.mov', '.mxf', '.mts', '.insv', '.insp'}
+            # Check subdirectories (Camera folders)
             for subdir in self.project_path.iterdir():
                 if subdir.is_dir() and not subdir.name.startswith('.'):
                     for video_file in subdir.iterdir():
                         if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
                             clips_to_analyze.append((video_file, None))
+            # Also check root of project folder
+            if not clips_to_analyze:
+                for video_file in self.project_path.iterdir():
+                    if video_file.is_file() and video_file.suffix.lower() in video_extensions and not video_file.name.startswith('.'):
+                        clips_to_analyze.append((video_file, None))
         
         if not clips_to_analyze:
             logger.error("No clips found to analyze")
