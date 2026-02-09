@@ -2038,13 +2038,25 @@ class TvasStatusApp(toga.App):
             if is_file:
                 result = await self.main_window.dialog(toga.OpenFileDialog(
                     title=dialog_title,
-                    file_types=["md", "txt"]
                 ))
             else:
                 result = await self.main_window.dialog(toga.SelectFolderDialog(title=dialog_title))
             
             if result:
-                path = Path(result)
+                # Handle result - it might be a Path, string, or URL-like object
+                try:
+                    if isinstance(result, Path):
+                        path = result
+                    elif isinstance(result, str):
+                        # Remove file:// prefix if present
+                        result_str = result.replace('file://', '')
+                        path = Path(result_str)
+                    else:
+                        # Try converting to string first
+                        path = Path(str(result))
+                except Exception as parse_error:
+                    logger.error(f"Failed to parse path from dialog result: {result} - {parse_error}")
+                    return
                 
                 # Run validation if provided
                 if validation_fn:
