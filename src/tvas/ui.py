@@ -1516,7 +1516,9 @@ class TvasStatusApp(toga.App):
         elif has_project:
             proxy_dir = self.proxy_path / self.project_path.name / "proxy"
         
-        has_proxies = proxy_dir and proxy_dir.exists() and any(proxy_dir.glob("*.mp4"))
+        has_proxies = proxy_dir and proxy_dir.exists() and any(
+            p for p in proxy_dir.iterdir() if p.suffix.lower() == '.mp4'
+        )
         has_analyses = proxy_dir and proxy_dir.exists() and any(proxy_dir.glob("*.json"))
         has_outline = self.outline_path is not None and self.outline_path.exists()
         
