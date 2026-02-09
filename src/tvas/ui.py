@@ -378,13 +378,17 @@ class OutlineGeneratorWindow(toga.Window):
             self.status_label.text = "Please write a plan first!"
             return
         
-        # Check for analysis.json
+        # Check for analysis.json (main dir first, then proxy dir)
         proxy_dir = self.app_instance._get_proxy_dir()
-        analysis_json_path = proxy_dir / "analysis.json"
+        main_dir = proxy_dir.parent
+        analysis_json_path = main_dir / "analysis.json"
         
         if not analysis_json_path.exists():
-            self.status_label.text = "No analysis.json found. Run analysis first!"
-            return
+            # Try proxy dir as fallback
+            analysis_json_path = proxy_dir / "analysis.json"
+            if not analysis_json_path.exists():
+                self.status_label.text = "No analysis.json found. Run analysis first!"
+                return
         
         self.generate_btn.enabled = False
         self.status_label.text = "Generating outline..."
